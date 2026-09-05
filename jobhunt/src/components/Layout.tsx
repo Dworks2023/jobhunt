@@ -18,10 +18,7 @@ import { Button, Input } from "./UI";
 const navigation = [
   { path: "/", label: "Dashboard", icon: LayoutDashboard },
   { path: "/candidates", label: "Candidates", icon: Users },
-  { path: "/add-candidate", label: "Add Candidate", icon: UserPlus },
-  { path: "/import", label: "Import Data", icon: Upload },
-  { path: "/analytics", label: "Analytics", icon: BarChart3 },
-  { path: "/settings", label: "Settings", icon: Settings },
+
 ];
 
 type LayoutProps = {
