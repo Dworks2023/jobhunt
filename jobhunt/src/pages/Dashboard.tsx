@@ -4,8 +4,6 @@ import {
   ArrowRight,
   CheckCircle2,
   Coins,
-  Upload,
-  UserPlus,
   Users,
 } from "lucide-react";
 import {
@@ -89,22 +87,6 @@ export default function Dashboard() {
     <Layout
       title="Program Dashboard"
       subtitle="Friday, 21 August 2026 · live snapshot of the job hunt support program"
-      actions={
-        <>
-          <Button
-            variant="outline"
-            onClick={() => navigate("/import")}
-          >
-            <Upload className="size-4" />
-            Import Excel
-          </Button>
-
-          <Button onClick={() => navigate("/add-candidate")}>
-            <UserPlus className="size-4" />
-            Add Candidate
-          </Button>
-        </>
-      }
     >
       {/* KPI CARDS */}
       <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-5">
