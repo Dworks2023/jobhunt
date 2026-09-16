@@ -3,7 +3,8 @@ import { BrowserRouter, Routes, Route } from "react-router-dom";
 import Dashboard from "./pages/Dashboard";
 import Candidates from "./pages/Candidates";
 import CandidateDetails from "./pages/CandidateDetails";
-
+import Analytics from "./pages/Analytics";
+import Settings from "./pages/Settings";
 
 export default function App() {
   return (
@@ -27,7 +28,17 @@ export default function App() {
           element={<CandidateDetails />}
         />
 
-       
+        {/* Analytics */}
+        <Route
+          path="/analytics"
+          element={<Analytics />}
+        />
+
+        {/* Settings */}
+        <Route
+          path="/settings"
+          element={<Settings />}
+        />
       </Routes>
     </BrowserRouter>
   );

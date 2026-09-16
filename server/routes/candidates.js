@@ -1,337 +1,2385 @@
-const express = require("express");
-const { getDatabase } = require("../db");
+import express from "express";
+import { ObjectId } from "mongodb";
+import multer from "multer";
+import * as XLSX from "xlsx";
+import path from "path";
+import fs from "fs";
+
+import { getDatabase } from "../db.js";
 
 const router = express.Router();
 
-const VALID_STATUSES = [
-  "Active",
-  "Completed",
-  "Expiring Soon",
-  "Paused",
-];
+/*
+|--------------------------------------------------------------------------
+| UPLOAD DIRECTORY
+|--------------------------------------------------------------------------
+*/
+
+const uploadsDirectory = path.join(
+  process.cwd(),
+  "uploads",
+);
+
+if (!fs.existsSync(uploadsDirectory)) {
+  fs.mkdirSync(uploadsDirectory, {
+    recursive: true,
+  });
+}
 
 /*
-  GET /api/candidates
+|--------------------------------------------------------------------------
+| MULTER CONFIGURATION
+|--------------------------------------------------------------------------
 */
+
+const storage = multer.diskStorage({
+  destination: (
+    req,
+    file,
+    callback,
+  ) => {
+    callback(null, uploadsDirectory);
+  },
+
+  filename: (
+    req,
+    file,
+    callback,
+  ) => {
+    const extension = path.extname(
+      file.originalname,
+    );
+
+    const safeBaseName = path
+      .basename(
+        file.originalname,
+        extension,
+      )
+      .replace(
+        /[^a-zA-Z0-9-_]/g,
+        "-",
+      )
+      .slice(0, 80);
+
+    const fileName =
+      `${Date.now()}-${Math.round(
+        Math.random() * 1e9,
+      )}-${safeBaseName}${extension}`;
+
+    callback(null, fileName);
+  },
+});
+
+const upload = multer({
+  storage,
+
+  limits: {
+    fileSize: 20 * 1024 * 1024,
+  },
+});
+
+/*
+|--------------------------------------------------------------------------
+| HELPER - CANDIDATE QUERY
+|--------------------------------------------------------------------------
+*/
+
+function getCandidateQuery(candidateId) {
+  if (ObjectId.isValid(candidateId)) {
+    return {
+      _id: new ObjectId(candidateId),
+    };
+  }
+
+  return {
+    id: candidateId,
+  };
+}
+
+/*
+|--------------------------------------------------------------------------
+| HELPER - DELETE FILE
+|--------------------------------------------------------------------------
+*/
+
+function deleteUploadedFile(filePath) {
+  if (!filePath) {
+    return;
+  }
+
+  try {
+    if (fs.existsSync(filePath)) {
+      fs.unlinkSync(filePath);
+    }
+  } catch (error) {
+    console.error(
+      "Unable to delete uploaded file:",
+      error,
+    );
+  }
+}
+
+/*
+|--------------------------------------------------------------------------
+| HELPER - GET NEXT CANDIDATE ID
+|--------------------------------------------------------------------------
+|
+| IMPORTANT:
+| This function finds the highest existing CD number.
+|
+| For normal single candidate creation, this is enough.
+|
+| During Excel import, DO NOT call this function repeatedly
+| without reserving IDs, because the new candidates have
+| not been inserted yet.
+|
+|--------------------------------------------------------------------------
+*/
+
+async function getHighestCandidateNumber(db) {
+  const candidates = await db
+    .collection("candidates")
+    .find(
+      {},
+      {
+        projection: {
+          id: 1,
+        },
+      },
+    )
+    .toArray();
+
+  let highestNumber = 0;
+
+  candidates.forEach((candidate) => {
+    const value = String(
+      candidate.id || "",
+    ).trim();
+
+    const match = value.match(
+      /^CD_(\d+)$/,
+    );
+
+    if (match) {
+      const number = Number(match[1]);
+
+      if (
+        Number.isFinite(number) &&
+        number > highestNumber
+      ) {
+        highestNumber = number;
+      }
+    }
+  });
+
+  return highestNumber;
+}
+
+/*
+|--------------------------------------------------------------------------
+| HELPER - CREATE CANDIDATE ID
+|--------------------------------------------------------------------------
+*/
+
+async function generateCandidateId(db) {
+  const highestNumber =
+    await getHighestCandidateNumber(db);
+
+  return `CD_${String(
+    highestNumber + 1,
+  ).padStart(2, "0")}`;
+}
+
+/*
+|--------------------------------------------------------------------------
+| HELPER - CREATE MULTIPLE UNIQUE CANDIDATE IDS
+|--------------------------------------------------------------------------
+|
+| This is the IMPORTANT FIX for Excel imports.
+|
+| We reserve a sequence of IDs BEFORE inserting the records.
+|
+| Example:
+|
+| Existing highest = CD_10
+|
+| Excel has 5 candidates:
+|
+| Candidate 1 = CD_11
+| Candidate 2 = CD_12
+| Candidate 3 = CD_13
+| Candidate 4 = CD_14
+| Candidate 5 = CD_15
+|
+|--------------------------------------------------------------------------
+*/
+
+async function generateImportCandidateIds(
+  db,
+  count,
+) {
+  const highestNumber =
+    await getHighestCandidateNumber(db);
+
+  const ids = [];
+
+  for (
+    let index = 1;
+    index <= count;
+    index++
+  ) {
+    const nextNumber =
+      highestNumber + index;
+
+    ids.push(
+      `CD_${String(
+        nextNumber,
+      ).padStart(2, "0")}`,
+    );
+  }
+
+  return ids;
+}
+
+/*
+|--------------------------------------------------------------------------
+| HELPER - FIND CANDIDATE
+|--------------------------------------------------------------------------
+*/
+
+async function findCandidate(
+  db,
+  candidateId,
+) {
+  const query =
+    getCandidateQuery(candidateId);
+
+  const candidate = await db
+    .collection("candidates")
+    .findOne(query);
+
+  return {
+    candidate,
+    query,
+  };
+}
+
+/*
+|--------------------------------------------------------------------------
+| HELPER - PLAN CREDITS
+|--------------------------------------------------------------------------
+*/
+
+function getPlanCredits(plan) {
+  const planNumber =
+    String(plan || "").match(/\d+/)?.[0] ||
+    "100";
+
+  const planCredits = {
+    "100": 100,
+    "250": 250,
+    "500": 500,
+    "1000": 1000,
+  };
+
+  return {
+    plan: planCredits[planNumber]
+      ? planNumber
+      : "100",
+
+    credits: planCredits[planNumber]
+      ? planCredits[planNumber]
+      : 100,
+  };
+}
+
+/*
+|--------------------------------------------------------------------------
+| HELPER - NORMALIZE IMPORT VALUE
+|--------------------------------------------------------------------------
+*/
+
+function normalizeImportValue(value) {
+  if (
+    value === null ||
+    value === undefined
+  ) {
+    return "";
+  }
+
+  return String(value).trim();
+}
+
+/*
+|--------------------------------------------------------------------------
+| HELPER - NORMALIZE EXCEL HEADER
+|--------------------------------------------------------------------------
+*/
+
+function normalizeImportHeader(header) {
+  return String(header || "")
+    .trim()
+    .toLowerCase()
+    .replace(/[\s_-]+/g, "");
+}
+
+/*
+|--------------------------------------------------------------------------
+| APPLICATION HELPERS
+|--------------------------------------------------------------------------
+*/
+
+function getTodayDate() {
+  const today = new Date();
+
+  const year = today.getFullYear();
+
+  const month = String(
+    today.getMonth() + 1,
+  ).padStart(2, "0");
+
+  const day = String(
+    today.getDate(),
+  ).padStart(2, "0");
+
+  return `${year}-${month}-${day}`;
+}
+
+function generateApplicationId() {
+  return `APP_${Date.now()}_${Math.floor(
+    Math.random() * 100000,
+  )}`;
+}
+
+/*
+|--------------------------------------------------------------------------
+| GET ALL CANDIDATES
+|--------------------------------------------------------------------------
+|
+| GET /api/candidates
+|
+|--------------------------------------------------------------------------
+*/
+
 router.get("/", async (req, res) => {
   try {
     const db = getDatabase();
 
-    const filter = {};
-
-    if (req.query.status) {
-      filter.status = req.query.status;
-    }
-
-    if (req.query.plan) {
-      filter.plan = req.query.plan;
-    }
-
-    if (req.query.domain) {
-      filter.domain = req.query.domain;
-    }
-
     const candidates = await db
       .collection("candidates")
-      .find(filter)
-      .sort({ createdAt: -1 })
+      .find({})
+      .sort({
+        createdAt: 1,
+        _id: 1,
+      })
       .toArray();
 
-    res.json({
-      success: true,
-      count: candidates.length,
-      data: candidates,
-    });
-  } catch (error) {
-    console.error("GET /api/candidates error:", error);
-
-    res.status(500).json({
-      success: false,
-      message: "Failed to fetch candidates",
-    });
-  }
-});
-
-/*
-  GET /api/candidates/:id
-*/
-router.get("/:id", async (req, res) => {
-  try {
-    const db = getDatabase();
-
-    const candidate = await db
-      .collection("candidates")
-      .findOne({
-        candidateId: req.params.id,
-      });
-
-    if (!candidate) {
-      return res.status(404).json({
-        success: false,
-        message: "Candidate not found",
-      });
-    }
-
-    res.json({
-      success: true,
-      data: candidate,
-    });
+    return res.json(candidates);
   } catch (error) {
     console.error(
-      "GET /api/candidates/:id error:",
+      "Error fetching candidates:",
       error,
     );
 
-    res.status(500).json({
-      success: false,
-      message: "Failed to fetch candidate",
+    return res.status(500).json({
+      message:
+        "Failed to fetch candidates.",
     });
   }
 });
 
 /*
-  POST /api/candidates
+|--------------------------------------------------------------------------
+| CREATE CANDIDATE
+|--------------------------------------------------------------------------
+|
+| POST /api/candidates
+|
+|--------------------------------------------------------------------------
 */
+
 router.post("/", async (req, res) => {
   try {
     const db = getDatabase();
 
-    const {
-      candidateId,
-      name,
-      email,
-      phone,
-      domain,
-      targetRole,
-      experience,
-      plan,
-      startDate,
-      owner,
-      location,
-      notes,
-    } = req.body;
+    const body = req.body || {};
 
-    if (
-      !name ||
-      !email ||
-      !domain ||
-      !plan ||
-      !startDate
-    ) {
+    /*
+    PLAN → CREDITS
+    */
+
+    const {
+      plan: selectedPlan,
+      credits: creditsTotal,
+    } = getPlanCredits(body.plan);
+
+    const creditsRemaining =
+      creditsTotal;
+
+    /*
+    GENERATE CANDIDATE ID
+    */
+
+    const candidateId =
+      body.id &&
+      String(body.id).trim()
+        ? String(body.id).trim()
+        : await generateCandidateId(db);
+
+    const now = new Date();
+
+    const newCandidate = {
+      ...body,
+
+      id: candidateId,
+
+      plan: selectedPlan,
+
+      creditsTotal,
+
+      creditsRemaining,
+
+      creditsUsed:
+        Number(body.creditsUsed) || 0,
+
+      monthly:
+        Array.isArray(body.monthly)
+          ? body.monthly
+          : [],
+
+      reports:
+        Array.isArray(body.reports)
+          ? body.reports
+          : [],
+
+      uploadedReports:
+        Array.isArray(
+          body.uploadedReports,
+        )
+          ? body.uploadedReports
+          : [],
+
+      uploadedMARReports:
+        Array.isArray(
+          body.uploadedMARReports,
+        )
+          ? body.uploadedMARReports
+          : [],
+
+      applicationHistory:
+        Array.isArray(
+          body.applicationHistory,
+        )
+          ? body.applicationHistory
+          : [],
+
+      feedback:
+        Array.isArray(body.feedback)
+          ? body.feedback
+          : [],
+
+      activity:
+        Array.isArray(body.activity)
+          ? body.activity
+          : [],
+
+      createdAt: now,
+
+      updatedAt: now,
+    };
+
+    const result = await db
+      .collection("candidates")
+      .insertOne(newCandidate);
+
+    return res.status(201).json({
+      ...newCandidate,
+
+      _id: result.insertedId,
+    });
+  } catch (error) {
+    console.error(
+      "Error creating candidate:",
+      error,
+    );
+
+    if (error?.code === 11000) {
       return res.status(400).json({
         success: false,
         message:
-          "Name, email, domain, plan and start date are required",
+          "A candidate with this email or ID already exists.",
       });
     }
 
-    /*
-      Find selected plan.
-      This is what automatically determines
-      credits and duration.
-    */
-    const selectedPlan = await db
-      .collection("plans")
-      .findOne({
-        name: plan,
-        active: true,
-      });
-
-    if (!selectedPlan) {
-      return res.status(400).json({
-        success: false,
-        message: "Selected plan does not exist",
-      });
-    }
-
-    /*
-      Generate candidate ID if frontend
-      doesn't provide one.
-    */
-    let newCandidateId = candidateId;
-
-    if (!newCandidateId) {
-      const lastCandidate = await db
-        .collection("candidates")
-        .find({})
-        .sort({ candidateId: -1 })
-        .limit(1)
-        .next();
-
-      let nextNumber = 1001;
-
-      if (lastCandidate?.candidateId) {
-        const number = Number(
-          lastCandidate.candidateId.replace(
-            "JH-",
-            "",
-          ),
-        );
-
-        if (!Number.isNaN(number)) {
-          nextNumber = number + 1;
-        }
-      }
-
-      newCandidateId = `JH-${nextNumber}`;
-    }
-
-    /*
-      Prevent duplicate candidate IDs.
-    */
-    const existing = await db
-      .collection("candidates")
-      .findOne({
-        candidateId: newCandidateId,
-      });
-
-    if (existing) {
-      return res.status(409).json({
-        success: false,
-        message: "Candidate ID already exists",
-      });
-    }
-
-    const start = new Date(startDate);
-
-    if (Number.isNaN(start.getTime())) {
-      return res.status(400).json({
-        success: false,
-        message: "Invalid start date",
-      });
-    }
-
-    /*
-      Calculate end date from plan duration.
-    */
-    const end = new Date(start);
-
-    end.setMonth(
-      end.getMonth() +
-        selectedPlan.durationMonths,
-    );
-
-    const candidate = {
-      candidateId: newCandidateId,
-
-      name,
-      email,
-      phone: phone || "",
-
-      domain,
-      targetRole: targetRole || "",
-      experience: experience || "",
-
-      plan: selectedPlan.name,
-
-      creditsTotal: selectedPlan.credits,
-      creditsRemaining: selectedPlan.credits,
-
-      status: "Active",
-
-      owner: owner || "",
-      location: location || "",
-      notes: notes || "",
-
-      startDate,
-      endDate: end.toISOString().slice(0, 10),
-
-      monthly: [],
-      reports: [],
-      feedback: [],
-
-      activity: [
-        {
-          id: `${newCandidateId}-A1`,
-          date: startDate,
-          text: `Enrolled in ${selectedPlan.name} plan`,
-        },
-      ],
-
-      createdAt: new Date(),
-      updatedAt: new Date(),
-    };
-
-    await db
-      .collection("candidates")
-      .insertOne(candidate);
-
-    res.status(201).json({
-      success: true,
-      message: "Candidate created successfully",
-      data: candidate,
-    });
-  } catch (error) {
-    console.error("POST /api/candidates error:", error);
-
-    res.status(500).json({
-      success: false,
-      message: "Failed to create candidate",
+    return res.status(500).json({
+      message:
+        "Failed to create candidate.",
     });
   }
 });
 
 /*
-  PATCH /api/candidates/:id/status
-
-  Example body:
-  {
-    "status": "Completed"
-  }
+|--------------------------------------------------------------------------
+| IMPORT CANDIDATES FROM EXCEL / CSV
+|--------------------------------------------------------------------------
+|
+| POST /api/candidates/import
+|
+| Supported:
+| .xlsx
+| .xls
+| .csv
+|
+| Required:
+| name
+| email
+|
+|--------------------------------------------------------------------------
 */
-router.patch("/:id/status", async (req, res) => {
+
+router.post(
+  "/import",
+  upload.single("file"),
+  async (req, res) => {
+    try {
+      const db = getDatabase();
+
+      /*
+      FILE VALIDATION
+      */
+
+      if (!req.file) {
+        return res.status(400).json({
+          success: false,
+          message:
+            "Please select an Excel or CSV file.",
+        });
+      }
+
+      const extension = path
+        .extname(
+          req.file.originalname,
+        )
+        .toLowerCase();
+
+      const allowedExtensions = [
+        ".xlsx",
+        ".xls",
+        ".csv",
+      ];
+
+      if (
+        !allowedExtensions.includes(
+          extension,
+        )
+      ) {
+        deleteUploadedFile(
+          req.file.path,
+        );
+
+        return res.status(400).json({
+          success: false,
+          message:
+            "Only .xlsx, .xls, and .csv files are supported.",
+        });
+      }
+
+      /*
+      READ EXCEL / CSV
+      */
+
+      const workbook = XLSX.read(
+        req.file.path,
+        {
+          type: "file",
+          cellDates: true,
+        },
+      );
+
+      const sheetName =
+        workbook.SheetNames[0];
+
+      if (!sheetName) {
+        deleteUploadedFile(
+          req.file.path,
+        );
+
+        return res.status(400).json({
+          success: false,
+          message:
+            "The uploaded file does not contain a worksheet.",
+        });
+      }
+
+      const worksheet =
+        workbook.Sheets[sheetName];
+
+      const rows =
+        XLSX.utils.sheet_to_json(
+          worksheet,
+          {
+            defval: "",
+          },
+        );
+
+      if (!rows.length) {
+        deleteUploadedFile(
+          req.file.path,
+        );
+
+        return res.status(400).json({
+          success: false,
+          message:
+            "The uploaded file is empty.",
+        });
+      }
+
+      /*
+      GET EXISTING EMAILS
+      */
+
+      const existingCandidates =
+        await db
+          .collection("candidates")
+          .find(
+            {},
+            {
+              projection: {
+                email: 1,
+              },
+            },
+          )
+          .toArray();
+
+      const existingEmails =
+        new Set(
+          existingCandidates
+            .map(
+              (candidate) =>
+                String(
+                  candidate.email || "",
+                )
+                  .trim()
+                  .toLowerCase(),
+            )
+            .filter(Boolean),
+        );
+
+      /*
+      ========================================
+      IMPORTANT
+      ========================================
+
+      Keep track of emails in the current file.
+      */
+
+      const uploadedEmails =
+        new Set();
+
+      /*
+      ========================================
+      FIRST PASS
+      ========================================
+
+      Build the valid candidate rows first.
+
+      We do this BEFORE generating IDs.
+      */
+
+      const validRows = [];
+
+      const skippedRows = [];
+
+      for (
+        let index = 0;
+        index < rows.length;
+        index++
+      ) {
+        const row = rows[index];
+
+        /*
+        Excel row number:
+        header = row 1
+        first data row = row 2
+        */
+
+        const rowNumber =
+          index + 2;
+
+        const normalizedRow = {};
+
+        Object.keys(row).forEach(
+          (header) => {
+            normalizedRow[
+              normalizeImportHeader(
+                header,
+              )
+            ] =
+              normalizeImportValue(
+                row[header],
+              );
+          },
+        );
+
+        const name =
+          normalizedRow.name || "";
+
+        const email =
+          normalizedRow.email || "";
+
+        /*
+        REQUIRED FIELDS
+        */
+
+        if (!name || !email) {
+          skippedRows.push({
+            row: rowNumber,
+            email,
+            reason:
+              "Name and email are required.",
+          });
+
+          continue;
+        }
+
+        const normalizedEmail =
+          email
+            .trim()
+            .toLowerCase();
+
+        /*
+        CHECK DATABASE DUPLICATE
+        */
+
+        if (
+          existingEmails.has(
+            normalizedEmail,
+          )
+        ) {
+          skippedRows.push({
+            row: rowNumber,
+            email:
+              normalizedEmail,
+            reason:
+              "Candidate with this email already exists.",
+          });
+
+          continue;
+        }
+
+        /*
+        CHECK DUPLICATE INSIDE FILE
+        */
+
+        if (
+          uploadedEmails.has(
+            normalizedEmail,
+          )
+        ) {
+          skippedRows.push({
+            row: rowNumber,
+            email:
+              normalizedEmail,
+            reason:
+              "Duplicate email in uploaded file.",
+          });
+
+          continue;
+        }
+
+        uploadedEmails.add(
+          normalizedEmail,
+        );
+
+        validRows.push({
+          rowNumber,
+          normalizedRow,
+          name,
+          email: normalizedEmail,
+        });
+      }
+
+      /*
+      ========================================
+      GENERATE UNIQUE IDS
+      ========================================
+
+      THIS IS THE MAIN FIX.
+
+      If 5 valid candidates are being imported,
+      we generate 5 different IDs BEFORE inserting.
+      */
+
+      const generatedIds =
+        await generateImportCandidateIds(
+          db,
+          validRows.length,
+        );
+
+      /*
+      ========================================
+      BUILD CANDIDATE DOCUMENTS
+      ========================================
+      */
+
+      const candidatesToInsert = [];
+
+      for (
+        let index = 0;
+        index < validRows.length;
+        index++
+      ) {
+        const validRow =
+          validRows[index];
+
+        const {
+          normalizedRow,
+          name,
+          email,
+        } = validRow;
+
+        /*
+        USE THE RESERVED UNIQUE ID
+        */
+
+        const candidateId =
+          generatedIds[index];
+
+        /*
+        PLAN → CREDITS
+        */
+
+        const {
+          plan,
+          credits,
+        } =
+          getPlanCredits(
+            normalizedRow.plan,
+          );
+
+        const now =
+          new Date();
+
+        /*
+        CREATE CANDIDATE
+        */
+
+        const candidate = {
+          /*
+          IMPORTANT:
+          Every candidate gets a UNIQUE id.
+          */
+
+          id: candidateId,
+
+          name,
+
+          email,
+
+          phone:
+            normalizedRow.phone ||
+            "",
+
+          location:
+            normalizedRow.location ||
+            "",
+
+          domain:
+            normalizedRow.domain ||
+            "",
+
+          targetRole:
+            normalizedRow.targetrole ||
+            normalizedRow.role ||
+            normalizedRow.jobrole ||
+            "",
+
+          experience:
+            normalizedRow.experience ||
+            "",
+
+          plan,
+
+          creditsTotal:
+            credits,
+
+          creditsRemaining:
+            credits,
+
+          creditsUsed: 0,
+
+          assignedSpecialist:
+            normalizedRow.assignedspecialist ||
+            normalizedRow.specialist ||
+            normalizedRow.assignedexpert ||
+            "",
+
+          startDate:
+            normalizedRow.startdate ||
+            normalizedRow.start ||
+            "",
+
+          status:
+            normalizedRow.status ||
+            "Active",
+
+          notes:
+            normalizedRow.notes ||
+            "",
+
+          monthly: [],
+
+          reports: [],
+
+          uploadedReports: [],
+
+          uploadedMARReports: [],
+
+          applicationHistory: [],
+
+          feedback: [],
+
+          activity: [],
+
+          createdAt: now,
+
+          updatedAt: now,
+        };
+
+        candidatesToInsert.push(
+          candidate,
+        );
+      }
+
+      /*
+      ========================================
+      INSERT ALL CANDIDATES
+      ========================================
+
+      MongoDB automatically generates a UNIQUE
+      _id for every document.
+
+      Our custom candidate id is also unique.
+      */
+
+      let insertedCandidates = [];
+
+      if (
+        candidatesToInsert.length > 0
+      ) {
+        try {
+          const result =
+            await db
+              .collection(
+                "candidates",
+              )
+              .insertMany(
+                candidatesToInsert,
+                {
+                  ordered: true,
+                },
+              );
+
+          /*
+          Convert inserted IDs into
+          returned candidate objects.
+          */
+
+          insertedCandidates =
+            candidatesToInsert.map(
+              (
+                candidate,
+                index,
+              ) => ({
+                ...candidate,
+
+                _id:
+                  result.insertedIds[
+                    index
+                  ],
+              }),
+            );
+        } catch (insertError) {
+          console.error(
+            "Error inserting imported candidates:",
+            insertError,
+          );
+
+          /*
+          Handle duplicate key errors.
+          */
+
+          if (
+            insertError?.code ===
+            11000
+          ) {
+            return res.status(400).json({
+              success: false,
+
+              message:
+                "One or more candidate records already exist. Please check duplicate emails or candidate IDs and try again.",
+            });
+          }
+
+          throw insertError;
+        }
+      }
+
+      /*
+      DELETE TEMPORARY FILE
+      */
+
+      deleteUploadedFile(
+        req.file.path,
+      );
+
+      /*
+      SUCCESS
+      */
+
+      return res.status(200).json({
+        success: true,
+
+        message:
+          `${insertedCandidates.length} candidate(s) imported successfully.`,
+
+        imported:
+          insertedCandidates.length,
+
+        skipped:
+          skippedRows.length,
+
+        skippedRows,
+
+        data:
+          insertedCandidates,
+      });
+    } catch (error) {
+      console.error(
+        "Error importing candidates:",
+        error,
+      );
+
+      deleteUploadedFile(
+        req.file?.path,
+      );
+
+      return res.status(500).json({
+        success: false,
+
+        message:
+          error?.message ||
+          "Failed to import candidates.",
+      });
+    }
+  },
+);
+
+/*
+|--------------------------------------------------------------------------
+| GET REPORTS
+|--------------------------------------------------------------------------
+|
+| GET /api/candidates/:candidateId/reports
+|
+|--------------------------------------------------------------------------
+*/
+
+router.get(
+  "/:candidateId/reports",
+  async (req, res) => {
+    try {
+      const db = getDatabase();
+
+      const {
+        candidate,
+      } = await findCandidate(
+        db,
+        req.params.candidateId,
+      );
+
+      if (!candidate) {
+        return res.status(404).json({
+          message:
+            "Candidate not found.",
+        });
+      }
+
+      return res.json({
+        data:
+          Array.isArray(
+            candidate.uploadedReports,
+          )
+            ? candidate.uploadedReports
+            : [],
+      });
+    } catch (error) {
+      console.error(
+        "Error fetching reports:",
+        error,
+      );
+
+      return res.status(500).json({
+        message:
+          "Failed to fetch reports.",
+      });
+    }
+  },
+);
+
+/*
+|--------------------------------------------------------------------------
+| UPLOAD REPORT / INTERVIEW CALL
+|--------------------------------------------------------------------------
+|
+| POST /api/candidates/:candidateId/reports
+|
+|--------------------------------------------------------------------------
+*/
+
+router.post(
+  "/:candidateId/reports",
+  upload.single("file"),
+  async (req, res) => {
+    try {
+      const db = getDatabase();
+
+      const {
+        candidate,
+        query,
+      } = await findCandidate(
+        db,
+        req.params.candidateId,
+      );
+
+      if (!candidate) {
+        deleteUploadedFile(
+          req.file?.path,
+        );
+
+        return res.status(404).json({
+          message:
+            "Candidate not found.",
+        });
+      }
+
+      if (!req.file) {
+        return res.status(400).json({
+          message:
+            "Please select a file.",
+        });
+      }
+
+      const type = String(
+        req.body.type || "",
+      ).trim();
+
+      const company = String(
+        req.body.company || "",
+      ).trim();
+
+      const role = String(
+        req.body.role || "",
+      ).trim();
+
+      const reportType = String(
+        req.body.reportType || "",
+      ).trim();
+
+      /*
+      VALIDATE TYPE
+      */
+
+      if (
+        type !== "Interview Call" &&
+        type !== "Report"
+      ) {
+        deleteUploadedFile(
+          req.file.path,
+        );
+
+        return res.status(400).json({
+          message:
+            "Please select Interview Call or Report.",
+        });
+      }
+
+      /*
+      INTERVIEW CALL
+      */
+
+      if (
+        type === "Interview Call"
+      ) {
+        if (
+          !req.file.mimetype.startsWith(
+            "image/",
+          )
+        ) {
+          deleteUploadedFile(
+            req.file.path,
+          );
+
+          return res.status(400).json({
+            message:
+              "Interview Call upload must be an image.",
+          });
+        }
+
+        if (!company) {
+          deleteUploadedFile(
+            req.file.path,
+          );
+
+          return res.status(400).json({
+            message:
+              "Company name is required.",
+          });
+        }
+
+        if (!role) {
+          deleteUploadedFile(
+            req.file.path,
+          );
+
+          return res.status(400).json({
+            message:
+              "Role is required.",
+          });
+        }
+      }
+
+      /*
+      REPORT
+      */
+
+      if (type === "Report") {
+        if (
+          req.file.mimetype !==
+          "application/pdf"
+        ) {
+          deleteUploadedFile(
+            req.file.path,
+          );
+
+          return res.status(400).json({
+            message:
+              "Report upload must be a PDF file.",
+          });
+        }
+
+        if (!reportType) {
+          deleteUploadedFile(
+            req.file.path,
+          );
+
+          return res.status(400).json({
+            message:
+              "Please select a report type.",
+          });
+        }
+
+        const allowedReportTypes = [
+          "15 Days Report",
+          "Monthly Report",
+          "Final Report",
+        ];
+
+        if (
+          !allowedReportTypes.includes(
+            reportType,
+          )
+        ) {
+          deleteUploadedFile(
+            req.file.path,
+          );
+
+          return res.status(400).json({
+            message:
+              "Invalid report type.",
+          });
+        }
+      }
+
+      /*
+      CREATE REPORT
+      */
+
+      const newReport = {
+        id: new ObjectId().toString(),
+
+        date: new Date()
+          .toISOString()
+          .split("T")[0],
+
+        type,
+
+        company:
+          type === "Interview Call"
+            ? company
+            : "",
+
+        role:
+          type === "Interview Call"
+            ? role
+            : "",
+
+        reportType:
+          type === "Report"
+            ? reportType
+            : "",
+
+        fileName:
+          req.file.originalname,
+
+        fileUrl:
+          `/uploads/${req.file.filename}`,
+
+        fileType:
+          req.file.mimetype,
+
+        createdAt: new Date(),
+      };
+
+      /*
+      SAVE
+      */
+
+      await db
+        .collection("candidates")
+        .updateOne(
+          query,
+          {
+            $push: {
+              uploadedReports:
+                newReport,
+            },
+
+            $set: {
+              updatedAt:
+                new Date(),
+            },
+          },
+        );
+
+      return res.status(201).json({
+        success: true,
+
+        data: newReport,
+      });
+    } catch (error) {
+      console.error(
+        "Error uploading report:",
+        error,
+      );
+
+      deleteUploadedFile(
+        req.file?.path,
+      );
+
+      return res.status(500).json({
+        message:
+          "Failed to upload file.",
+      });
+    }
+  },
+);
+
+/*
+|--------------------------------------------------------------------------
+| GET DAILY MAR REPORTS
+|--------------------------------------------------------------------------
+*/
+
+router.get(
+  "/:candidateId/mar",
+  async (req, res) => {
+    try {
+      const db = getDatabase();
+
+      const {
+        candidate,
+      } = await findCandidate(
+        db,
+        req.params.candidateId,
+      );
+
+      if (!candidate) {
+        return res.status(404).json({
+          message:
+            "Candidate not found.",
+        });
+      }
+
+      return res.json({
+        data:
+          Array.isArray(
+            candidate.uploadedMARReports,
+          )
+            ? candidate.uploadedMARReports
+            : [],
+      });
+    } catch (error) {
+      console.error(
+        "Error fetching MAR reports:",
+        error,
+      );
+
+      return res.status(500).json({
+        message:
+          "Failed to fetch MAR reports.",
+      });
+    }
+  },
+);
+
+/*
+|--------------------------------------------------------------------------
+| UPLOAD DAILY MAR REPORT
+|--------------------------------------------------------------------------
+|
+| TXT / PDF
+|
+|--------------------------------------------------------------------------
+*/
+
+router.post(
+  "/:candidateId/mar",
+  upload.single("file"),
+  async (req, res) => {
+    try {
+      const db = getDatabase();
+
+      const {
+        candidate,
+        query,
+      } = await findCandidate(
+        db,
+        req.params.candidateId,
+      );
+
+      if (!candidate) {
+        deleteUploadedFile(
+          req.file?.path,
+        );
+
+        return res.status(404).json({
+          message:
+            "Candidate not found.",
+        });
+      }
+
+      if (!req.file) {
+        return res.status(400).json({
+          message:
+            "Please select a MAR file.",
+        });
+      }
+
+      const extension = path
+        .extname(
+          req.file.originalname,
+        )
+        .toLowerCase();
+
+      const allowedExtensions = [
+        ".txt",
+        ".pdf",
+      ];
+
+      if (
+        !allowedExtensions.includes(
+          extension,
+        )
+      ) {
+        deleteUploadedFile(
+          req.file.path,
+        );
+
+        return res.status(400).json({
+          message:
+            "Daily MAR Report must be a .txt or PDF file.",
+        });
+      }
+
+      const fileFormat =
+        extension === ".pdf"
+          ? "PDF"
+          : "TXT";
+
+      const newMARReport = {
+        id: new ObjectId().toString(),
+
+        date: new Date()
+          .toISOString()
+          .split("T")[0],
+
+        fileName:
+          req.file.originalname,
+
+        fileUrl:
+          `/uploads/${req.file.filename}`,
+
+        fileType:
+          req.file.mimetype,
+
+        fileFormat,
+
+        createdAt: new Date(),
+      };
+
+      await db
+        .collection("candidates")
+        .updateOne(
+          query,
+          {
+            $push: {
+              uploadedMARReports:
+                newMARReport,
+            },
+
+            $set: {
+              updatedAt:
+                new Date(),
+            },
+          },
+        );
+
+      return res.status(201).json({
+        success: true,
+
+        data: newMARReport,
+      });
+    } catch (error) {
+      console.error(
+        "Error uploading MAR report:",
+        error,
+      );
+
+      deleteUploadedFile(
+        req.file?.path,
+      );
+
+      return res.status(500).json({
+        message:
+          "Failed to upload MAR report.",
+      });
+    }
+  },
+);
+
+/*
+|--------------------------------------------------------------------------
+| GET CANDIDATE ACTIVITY
+|--------------------------------------------------------------------------
+*/
+
+router.get(
+  "/:candidateId/activity",
+  async (req, res) => {
+    try {
+      const db = getDatabase();
+
+      const {
+        candidate,
+      } = await findCandidate(
+        db,
+        req.params.candidateId,
+      );
+
+      if (!candidate) {
+        return res.status(404).json({
+          message:
+            "Candidate not found.",
+        });
+      }
+
+      return res.json({
+        data:
+          Array.isArray(
+            candidate.activity,
+          )
+            ? candidate.activity
+            : [],
+      });
+    } catch (error) {
+      console.error(
+        "Error fetching activity:",
+        error,
+      );
+
+      return res.status(500).json({
+        message:
+          "Failed to fetch activity.",
+      });
+    }
+  },
+);
+
+/*
+|--------------------------------------------------------------------------
+| UPDATE CANDIDATE STATUS
+|--------------------------------------------------------------------------
+|
+| PATCH /api/candidates/:candidateId/status
+|
+|--------------------------------------------------------------------------
+*/
+
+router.patch(
+  "/:candidateId/status",
+  async (req, res) => {
+    try {
+      const db = getDatabase();
+
+      const {
+        status,
+      } = req.body || {};
+
+      const allowedStatuses = [
+        "Active",
+        "Completed",
+        "Expiring Soon",
+        "Paused",
+      ];
+
+      if (
+        !allowedStatuses.includes(
+          status,
+        )
+      ) {
+        return res.status(400).json({
+          message:
+            "Invalid candidate status.",
+        });
+      }
+
+      const query =
+        getCandidateQuery(
+          req.params.candidateId,
+        );
+
+      const result =
+        await db
+          .collection("candidates")
+          .findOneAndUpdate(
+            query,
+            {
+              $set: {
+                status,
+
+                updatedAt:
+                  new Date(),
+              },
+            },
+            {
+              returnDocument: "after",
+            },
+          );
+
+      if (!result) {
+        return res.status(404).json({
+          message:
+            "Candidate not found.",
+        });
+      }
+
+      return res.json(result);
+    } catch (error) {
+      console.error(
+        "Error updating status:",
+        error,
+      );
+
+      return res.status(500).json({
+        message:
+          "Failed to update candidate status.",
+      });
+    }
+  },
+);
+
+/*
+|--------------------------------------------------------------------------
+| GET APPLICATION HISTORY
+|--------------------------------------------------------------------------
+|
+| GET /api/candidates/:candidateId/applications
+|
+|--------------------------------------------------------------------------
+*/
+
+router.get(
+  "/:candidateId/applications",
+  async (req, res) => {
+    try {
+      const db = getDatabase();
+
+      const {
+        candidate,
+      } = await findCandidate(
+        db,
+        req.params.candidateId,
+      );
+
+      if (!candidate) {
+        return res.status(404).json({
+          success: false,
+
+          message:
+            "Candidate not found.",
+        });
+      }
+
+      const applicationHistory =
+        Array.isArray(
+          candidate.applicationHistory,
+        )
+          ? [
+              ...candidate.applicationHistory,
+            ]
+          : [];
+
+      applicationHistory.sort(
+        (first, second) =>
+          new Date(
+            second.date,
+          ).getTime() -
+          new Date(
+            first.date,
+          ).getTime(),
+      );
+
+      const creditsTotal =
+        Number(
+          candidate.creditsTotal,
+        ) || 0;
+
+      const creditsRemaining =
+        Number.isFinite(
+          Number(
+            candidate.creditsRemaining,
+          ),
+        )
+          ? Number(
+              candidate.creditsRemaining,
+            )
+          : creditsTotal;
+
+      const creditsUsed =
+        Number.isFinite(
+          Number(
+            candidate.creditsUsed,
+          ),
+        )
+          ? Number(
+              candidate.creditsUsed,
+            )
+          : creditsTotal -
+            creditsRemaining;
+
+      return res.status(200).json({
+        success: true,
+
+        data: applicationHistory,
+
+        creditsTotal,
+
+        creditsUsed,
+
+        creditsRemaining,
+      });
+    } catch (error) {
+      console.error(
+        "Error getting application history:",
+        error,
+      );
+
+      return res.status(500).json({
+        success: false,
+
+        message:
+          "Failed to load application history.",
+      });
+    }
+  },
+);
+
+/*
+|--------------------------------------------------------------------------
+| ADD APPLICATIONS
+|--------------------------------------------------------------------------
+|
+| POST /api/candidates/:candidateId/applications
+|
+|--------------------------------------------------------------------------
+*/
+
+router.post(
+  "/:candidateId/applications",
+  async (req, res) => {
+    try {
+      const db = getDatabase();
+
+      const {
+        applications,
+        date,
+        updatedBy,
+      } = req.body || {};
+
+      const applicationCount =
+        Number(applications);
+
+      if (
+        !Number.isFinite(
+          applicationCount,
+        ) ||
+        applicationCount <= 0 ||
+        !Number.isInteger(
+          applicationCount,
+        )
+      ) {
+        return res.status(400).json({
+          success: false,
+
+          message:
+            "Applications must be a whole number greater than 0.",
+        });
+      }
+
+      const {
+        candidate,
+        query,
+      } = await findCandidate(
+        db,
+        req.params.candidateId,
+      );
+
+      if (!candidate) {
+        return res.status(404).json({
+          success: false,
+
+          message:
+            "Candidate not found.",
+        });
+      }
+
+      const creditsTotal =
+        Number(
+          candidate.creditsTotal,
+        ) || 0;
+
+      const applicationHistory =
+        Array.isArray(
+          candidate.applicationHistory,
+        )
+          ? [
+              ...candidate.applicationHistory,
+            ]
+          : [];
+
+      const previousApplicationsUsed =
+        applicationHistory.reduce(
+          (total, item) =>
+            total +
+            (
+              Number(
+                item.applications,
+              ) || 0
+            ),
+          0,
+        );
+
+      const storedCreditsRemaining =
+        Number(
+          candidate.creditsRemaining,
+        );
+
+      const currentCreditsRemaining =
+        Number.isFinite(
+          storedCreditsRemaining,
+        )
+          ? storedCreditsRemaining
+          : Math.max(
+              creditsTotal -
+                previousApplicationsUsed,
+              0,
+            );
+
+      if (
+        applicationCount >
+        currentCreditsRemaining
+      ) {
+        return res.status(400).json({
+          success: false,
+
+          message:
+            `Only ${currentCreditsRemaining} application credits are remaining.`,
+        });
+      }
+
+      const applicationDate =
+        typeof date === "string" &&
+        /^\d{4}-\d{2}-\d{2}$/.test(
+          date,
+        )
+          ? date
+          : getTodayDate();
+
+      /*
+      CREATE NEW HISTORY ENTRY
+      */
+
+      const savedEntry = {
+        id:
+          generateApplicationId(),
+
+        date:
+          applicationDate,
+
+        applications:
+          applicationCount,
+
+        updatedBy:
+          String(
+            updatedBy ||
+              candidate.owner ||
+              candidate.assignedSpecialist ||
+              "Unassigned",
+          ).trim(),
+
+        createdAt:
+          new Date(),
+
+        updatedAt:
+          new Date(),
+      };
+
+      /*
+      DO NOT MERGE SAME-DAY ENTRIES
+      */
+
+      applicationHistory.push(
+        savedEntry,
+      );
+
+      /*
+      RECALCULATE USED CREDITS
+      */
+
+      const creditsUsed =
+        applicationHistory.reduce(
+          (total, item) =>
+            total +
+            (
+              Number(
+                item.applications,
+              ) || 0
+            ),
+          0,
+        );
+
+      const creditsRemaining =
+        Math.max(
+          creditsTotal -
+            creditsUsed,
+          0,
+        );
+
+      /*
+      UPDATE DATABASE
+      */
+
+      const result =
+        await db
+          .collection("candidates")
+          .findOneAndUpdate(
+            query,
+            {
+              $set: {
+                applicationHistory,
+
+                creditsUsed,
+
+                creditsRemaining,
+
+                updatedAt:
+                  new Date(),
+              },
+            },
+            {
+              returnDocument: "after",
+            },
+          );
+
+      if (!result) {
+        return res.status(404).json({
+          success: false,
+
+          message:
+            "Candidate not found.",
+        });
+      }
+
+      return res.status(201).json({
+        success: true,
+
+        message:
+          "Applications updated successfully.",
+
+        data: savedEntry,
+
+        creditsTotal,
+
+        creditsUsed,
+
+        creditsRemaining,
+      });
+    } catch (error) {
+      console.error(
+        "Error saving applications:",
+        error,
+      );
+
+      return res.status(500).json({
+        success: false,
+
+        message:
+          "Failed to save applications.",
+      });
+    }
+  },
+);
+
+/*
+|--------------------------------------------------------------------------
+| GET SINGLE CANDIDATE
+|--------------------------------------------------------------------------
+|
+| GET /api/candidates/:candidateId
+|
+|--------------------------------------------------------------------------
+*/
+
+router.get(
+  "/:candidateId",
+  async (req, res) => {
+    try {
+      const db = getDatabase();
+
+      const {
+        candidate,
+      } = await findCandidate(
+        db,
+        req.params.candidateId,
+      );
+
+      if (!candidate) {
+        return res.status(404).json({
+          message:
+            "Candidate not found.",
+        });
+      }
+
+      return res.json(candidate);
+    } catch (error) {
+      console.error(
+        "Error fetching candidate:",
+        error,
+      );
+
+      return res.status(500).json({
+        message:
+          "Failed to fetch candidate.",
+      });
+    }
+  },
+);
+
+/*
+|--------------------------------------------------------------------------
+| UPDATE CANDIDATE HANDLER
+|--------------------------------------------------------------------------
+*/
+
+async function updateCandidateHandler(
+  req,
+  res,
+) {
   try {
     const db = getDatabase();
 
-    const { status } = req.body;
+    const query =
+      getCandidateQuery(
+        req.params.candidateId,
+      );
 
-    if (!VALID_STATUSES.includes(status)) {
-      return res.status(400).json({
+    const existingCandidate =
+      await db
+        .collection("candidates")
+        .findOne(query);
+
+    if (!existingCandidate) {
+      return res.status(404).json({
         success: false,
-        message: "Invalid candidate status",
+
+        message:
+          "Candidate not found.",
       });
     }
 
-    const result = await db
-      .collection("candidates")
-      .findOneAndUpdate(
-        {
-          candidateId: req.params.id,
-        },
-        {
-          $set: {
-            status,
-            updatedAt: new Date(),
+    const updates = {
+      ...req.body,
+
+      updatedAt: new Date(),
+    };
+
+    /*
+    Prevent ID changes.
+    */
+
+    delete updates._id;
+    delete updates.id;
+
+    /*
+    Normalize email.
+    */
+
+    if (
+      updates.email !==
+      undefined
+    ) {
+      updates.email =
+        String(
+          updates.email,
+        )
+          .trim()
+          .toLowerCase();
+    }
+
+    /*
+    If plan is changed,
+    automatically update credits.
+    */
+
+    if (
+      updates.plan !==
+      undefined
+    ) {
+      const {
+        plan,
+        credits,
+      } =
+        getPlanCredits(
+          updates.plan,
+        );
+
+      updates.plan = plan;
+
+      /*
+      Only reset credits when
+      the plan actually changes.
+      */
+
+      if (
+        String(
+          existingCandidate.plan ||
+            "",
+        ) !== plan
+      ) {
+        updates.creditsTotal =
+          credits;
+
+        updates.creditsRemaining =
+          credits;
+
+        updates.creditsUsed =
+          0;
+
+        updates.applicationHistory =
+          [];
+      }
+    }
+
+    const result =
+      await db
+        .collection("candidates")
+        .findOneAndUpdate(
+          query,
+          {
+            $set: updates,
           },
-        },
-        {
-          returnDocument: "after",
-        },
-      );
+          {
+            returnDocument: "after",
+          },
+        );
 
     if (!result) {
       return res.status(404).json({
         success: false,
-        message: "Candidate not found",
+
+        message:
+          "Candidate not found.",
       });
     }
 
-    res.json({
+    return res.status(200).json({
       success: true,
-      message: "Candidate status updated",
+
+      message:
+        "Candidate updated successfully.",
+
       data: result,
     });
   } catch (error) {
     console.error(
-      "PATCH /api/candidates/:id/status error:",
+      "Error updating candidate:",
       error,
     );
 
-    res.status(500).json({
+    if (
+      error?.code === 11000
+    ) {
+      return res.status(400).json({
+        success: false,
+
+        message:
+          "A candidate with this email already exists.",
+      });
+    }
+
+    return res.status(500).json({
       success: false,
-      message: "Failed to update candidate status",
+
+      message:
+        "Failed to update candidate.",
     });
   }
-});
+}
 
-module.exports = router;
+/*
+|--------------------------------------------------------------------------
+| PUT UPDATE
+|--------------------------------------------------------------------------
+*/
+
+router.put(
+  "/:candidateId",
+  updateCandidateHandler,
+);
+
+/*
+|--------------------------------------------------------------------------
+| PATCH UPDATE
+|--------------------------------------------------------------------------
+*/
+
+router.patch(
+  "/:candidateId",
+  updateCandidateHandler,
+);
+
+/*
+|--------------------------------------------------------------------------
+| DELETE CANDIDATE
+|--------------------------------------------------------------------------
+|
+| DELETE /api/candidates/:candidateId
+|
+|--------------------------------------------------------------------------
+*/
+
+router.delete(
+  "/:candidateId",
+  async (req, res) => {
+    try {
+      const db = getDatabase();
+
+      /*
+      IMPORTANT:
+      Delete ONLY the candidate matching
+      the supplied unique ID.
+      */
+
+      const query =
+        getCandidateQuery(
+          req.params.candidateId,
+        );
+
+      console.log(
+        "Deleting candidate with query:",
+        query,
+      );
+
+      const result =
+        await db
+          .collection("candidates")
+          .deleteOne(query);
+
+      if (
+        result.deletedCount === 0
+      ) {
+        return res.status(404).json({
+          success: false,
+
+          message:
+            "Candidate not found.",
+        });
+      }
+
+      return res.json({
+        success: true,
+
+        message:
+          "Candidate deleted successfully.",
+
+        deletedCount:
+          result.deletedCount,
+      });
+    } catch (error) {
+      console.error(
+        "Error deleting candidate:",
+        error,
+      );
+
+      return res.status(500).json({
+        success: false,
+
+        message:
+          "Failed to delete candidate.",
+      });
+    }
+  },
+);
+
+/*
+|--------------------------------------------------------------------------
+| MULTER ERROR HANDLER
+|--------------------------------------------------------------------------
+*/
+
+router.use(
+  (
+    error,
+    req,
+    res,
+    next,
+  ) => {
+    if (
+      error instanceof
+      multer.MulterError
+    ) {
+      return res.status(400).json({
+        message:
+          error.code ===
+          "LIMIT_FILE_SIZE"
+            ? "File is too large. Maximum allowed size is 20MB."
+            : error.message,
+      });
+    }
+
+    return next(error);
+  },
+);
+
+export default router;
