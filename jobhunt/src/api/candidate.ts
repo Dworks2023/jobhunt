@@ -1,7 +1,6 @@
 const API_URL =
   "http://localhost:5000/api/candidates";
 
-
 /*
 ========================================
 APPLICATION HISTORY TYPE
@@ -10,58 +9,29 @@ APPLICATION HISTORY TYPE
 
 export type ApplicationHistoryItem = {
   id: string;
-
   date: string;
-
   applications: number;
-
   updatedBy: string;
-
   createdAt?: string;
-
   updatedAt?: string;
 };
 
-
-/*
-========================================
-APPLICATION HISTORY RESPONSE TYPE
-========================================
-*/
-
 export type ApplicationHistoryResponse = {
   success: boolean;
-
   data: ApplicationHistoryItem[];
-
   creditsTotal: number;
-
   creditsUsed: number;
-
   creditsRemaining: number;
 };
-
-
-/*
-========================================
-ADD DAILY APPLICATION RESPONSE TYPE
-========================================
-*/
 
 export type AddDailyApplicationsResponse = {
   success: boolean;
-
   message: string;
-
   data: ApplicationHistoryItem;
-
   creditsTotal: number;
-
   creditsUsed: number;
-
   creditsRemaining: number;
 };
-
 
 /*
 ========================================
@@ -71,104 +41,92 @@ CANDIDATE TYPE
 
 export type Candidate = {
   _id?: string;
-
   id?: string;
 
   name: string;
-
   email: string;
 
   phone?: string;
-
   location?: string;
-
   domain?: string;
-
   targetRole?: string;
-
   experience?: string;
-
   plan?: string;
-
   assignedSpecialist?: string;
-
   startDate?: string;
-
   status?: string;
-
   notes?: string;
 
-  /*
-  ========================================
-  APPLICATION CREDITS
-  ========================================
-  */
-
   creditsTotal?: number;
-
   creditsUsed?: number;
-
   creditsRemaining?: number;
 
-  /*
-  ========================================
-  APPLICATION HISTORY
-  ========================================
-  */
-
-  applicationHistory?:
-    ApplicationHistoryItem[];
+  applicationHistory?: ApplicationHistoryItem[];
 
   daysRemaining?: number;
 
   createdAt?: string;
-
   updatedAt?: string;
 };
 
-
-/*
-========================================
-CANDIDATE FORM TYPE
-========================================
-*/
-
 export type CandidateForm = {
   name: string;
-
   email: string;
 
   phone?: string;
-
   location?: string;
-
   domain?: string;
-
   targetRole?: string;
-
   experience?: string;
-
   plan?: string;
-
   assignedSpecialist?: string;
-
   startDate?: string;
-
   status?: string;
-
   notes?: string;
 
-  /*
-  Application credits
-  */
-
   creditsTotal?: number;
-
   creditsRemaining?: number;
-
   daysRemaining?: number;
 };
 
+/*
+========================================
+CANDIDATE NORMALIZATION HELPERS
+========================================
+*/
+
+function normalizeCandidate(candidate: any): Candidate {
+  if (!candidate || typeof candidate !== "object") {
+    throw new Error(
+      "Invalid candidate data received from the server."
+    );
+  }
+
+  const rawId = candidate.id ?? candidate._id;
+
+  const id =
+    rawId == null
+      ? ""
+      : typeof rawId === "string"
+        ? rawId
+        : String(rawId);
+
+  return {
+    ...candidate,
+    id,
+    _id:
+      candidate._id == null
+        ? undefined
+        : typeof candidate._id === "string"
+          ? candidate._id
+          : String(candidate._id),
+  } as Candidate;
+}
+
+function extractCandidate(payload: any): any {
+  const outer = payload?.data ?? payload;
+  return outer?.candidate ?? outer;
+}
 
 /*
 ========================================
@@ -176,39 +134,29 @@ PARSE API RESPONSE
 ========================================
 */
 
-async function parseResponse(
-  response: Response,
-) {
-  const text =
-    await response.text();
+async function parseResponse(response: Response) {
+  const text = await response.text();
 
   let data: any = null;
 
   try {
-    data =
-      text
-        ? JSON.parse(
-            text,
-          )
-        : {};
+    data = text ? JSON.parse(text) : {};
   } catch {
     throw new Error(
-      text ||
-        "Server returned an invalid response.",
+      text || "Server returned an invalid response."
     );
   }
 
   if (!response.ok) {
     throw new Error(
       data?.message ||
-        data?.error ||
-        "API request failed.",
+      data?.error ||
+      "API request failed."
     );
   }
 
   return data;
 }
-
 
 /*
 ========================================
@@ -217,43 +165,77 @@ GET /api/candidates
 ========================================
 */
 
-export async function getCandidates(): Promise<
-  Candidate[]
-> {
-  const response =
-    await fetch(
-      API_URL,
-    );
+export async function getCandidates(): Promise<Candidate[]> {
+  const response = await fetch(API_URL, {
+    method: "GET",
+    headers: {
+      Accept: "application/json",
+    },
+    cache: "no-store",
+  });
 
-  const data =
-    await parseResponse(
-      response,
-    );
+  const data = await parseResponse(response);
 
   console.log(
     "Get candidates API response:",
-    data,
+    data
   );
 
-  if (
-    Array.isArray(
-      data?.data,
-    )
-  ) {
-    return data.data;
+  const candidates =
+    Array.isArray(data?.data)
+      ? data.data
+      : Array.isArray(data?.candidates)
+        ? data.candidates
+        : Array.isArray(data)
+          ? data
+          : null;
+
+  if (!candidates) {
+    throw new Error(
+      "Candidates API returned an invalid response."
+    );
   }
 
-  if (
-    Array.isArray(
-      data,
+  return candidates
+    .map((candidate: any, index: number) => ({
+      candidate: normalizeCandidate(candidate),
+      originalIndex: index,
+    }))
+    .filter(
+      ({ candidate }: { candidate: Candidate }) =>
+        Boolean(candidate.id)
     )
-  ) {
-    return data;
-  }
+    .sort(
+      (
+        a: {
+          candidate: Candidate;
+          originalIndex: number;
+        },
+        b: {
+          candidate: Candidate;
+          originalIndex: number;
+        }
+      ) => {
+        const aTime = a.candidate.createdAt
+          ? new Date(a.candidate.createdAt).getTime()
+          : Number.NaN;
 
-  return [];
+        const bTime = b.candidate.createdAt
+          ? new Date(b.candidate.createdAt).getTime()
+          : Number.NaN;
+
+        if (
+          !Number.isFinite(aTime) ||
+          !Number.isFinite(bTime)
+        ) {
+          return a.originalIndex - b.originalIndex;
+        }
+
+        return aTime - bTime;
+      }
+    )
+    .map(({ candidate }) => candidate);
 }
-
 
 /*
 ========================================
@@ -276,62 +258,76 @@ export async function importCandidates(
   }>;
   data: Candidate[];
 }> {
+  if (!file) {
+    throw new Error("Please select an Excel file.");
+  }
 
-  const formData =
-    new FormData();
+  const isExcelFile =
+    file.name.toLowerCase().endsWith(".xlsx") ||
+    file.name.toLowerCase().endsWith(".xls");
 
-  formData.append(
-    "file",
-    file,
+  if (!isExcelFile) {
+    throw new Error(
+      "Please select a valid Excel file (.xlsx or .xls).",
+    );
+  }
+
+  const formData = new FormData();
+
+  formData.append("file", file, file.name);
+
+  const response = await fetch(
+    `${API_URL}/import`,
+    {
+      method: "POST",
+      body: formData,
+    },
   );
 
-  const response =
-    await fetch(
-      `${API_URL}/import`,
-      {
-        method: "POST",
-        body: formData,
-      },
-    );
+  const data = await parseResponse(response);
 
-  const data =
-    await parseResponse(
-      response,
-    );
+  const imported =
+    Number(data?.imported ?? data?.count) || 0;
+
+  const skipped =
+    Number(data?.skipped) || 0;
+
+  const importedCandidatesRaw =
+    Array.isArray(data?.data)
+      ? data.data
+      : Array.isArray(data?.candidates)
+        ? data.candidates
+        : [];
+
+  const importedCandidates =
+    importedCandidatesRaw
+      .map((candidate: any) =>
+        normalizeCandidate(candidate),
+      )
+      .filter((candidate: Candidate) =>
+        Boolean(candidate.id),
+      );
 
   return {
     success:
-      Boolean(
-        data?.success,
-      ),
+      data?.success !== false,
 
     message:
       data?.message ||
-      "Candidates imported successfully.",
+      `Excel import completed. ${imported} candidate(s) imported and ${skipped} skipped.`,
 
-    imported:
-      Number(
-        data?.imported,
-      ) || 0,
+    imported,
 
-    skipped:
-      Number(
-        data?.skipped,
-      ) || 0,
+    skipped,
 
     skippedRows:
-      Array.isArray(
-        data?.skippedRows,
-      )
+      Array.isArray(data?.skippedRows)
         ? data.skippedRows
-        : [],
+        : Array.isArray(data?.errors)
+          ? data.errors
+          : [],
 
-    data:
-      Array.isArray(
-        data?.data,
-      )
-        ? data.data
-        : [],
+    data: importedCandidates,
   };
 }
 
@@ -355,38 +351,19 @@ export async function getCandidate(
       response,
     );
 
-  const candidate =
-    data?.data ??
-    data;
+  const candidate = extractCandidate(data);
 
   if (
     !candidate ||
-    typeof candidate !==
-      "object"
+    typeof candidate !== "object"
   ) {
     throw new Error(
       "Candidate data was not returned by the server.",
     );
   }
 
-  /*
-  Normalize MongoDB _id to id
-  */
-
-  if (
-    !candidate.id &&
-    candidate._id
-  ) {
-    candidate.id =
-      typeof candidate._id ===
-      "string"
-        ? candidate._id
-        : candidate._id.toString();
-  }
-
-  return candidate as Candidate;
+  return normalizeCandidate(candidate);
 }
-
 
 /*
 ========================================
@@ -402,7 +379,6 @@ export async function getCandidateById(
     id,
   );
 }
-
 
 /*
 ========================================
@@ -423,10 +399,6 @@ export async function getApplicationHistory(
     await parseResponse(
       response,
     );
-
-  /*
-  Safety fallback
-  */
 
   return {
     success:
@@ -457,7 +429,6 @@ export async function getApplicationHistory(
   };
 }
 
-
 /*
 ========================================
 ADD DAILY APPLICATIONS
@@ -470,9 +441,7 @@ export async function addDailyApplications(
 
   applicationData: {
     applications: number;
-
     date?: string;
-
     updatedBy?: string;
   },
 ): Promise<AddDailyApplicationsResponse> {
@@ -480,8 +449,7 @@ export async function addDailyApplications(
     await fetch(
       `${API_URL}/${id}/applications`,
       {
-        method:
-          "POST",
+        method: "POST",
 
         headers: {
           "Content-Type":
@@ -502,8 +470,7 @@ export async function addDailyApplications(
 
   if (
     !data?.data ||
-    typeof data.data !==
-      "object"
+    typeof data.data !== "object"
   ) {
     throw new Error(
       "Applications were saved, but invalid data was returned.",
@@ -538,7 +505,6 @@ export async function addDailyApplications(
       ) || 0,
   };
 }
-
 
 /*
 ========================================
@@ -578,52 +544,18 @@ export async function createCandidate(
     data,
   );
 
-  /*
-  Backend may return:
-
-  {
-    success: true,
-    message: "...",
-    data: { candidate }
-  }
-
-  OR directly:
-
-  { candidate }
-  */
-
-  const candidate =
-    data?.data ??
-    data;
+  const candidate = extractCandidate(data);
 
   if (
     !candidate ||
-    typeof candidate !==
-      "object"
+    typeof candidate !== "object"
   ) {
     throw new Error(
       "Candidate was created, but the server did not return candidate data.",
     );
   }
 
-  /*
-  Normalize MongoDB _id
-  */
-
-  if (
-    !candidate.id &&
-    candidate._id
-  ) {
-    candidate.id =
-      typeof candidate._id ===
-      "string"
-        ? candidate._id
-        : candidate._id.toString();
-  }
-
-  if (
-    !candidate.name
-  ) {
+  if (!candidate.name) {
     console.error(
       "Invalid candidate returned:",
       candidate,
@@ -634,9 +566,16 @@ export async function createCandidate(
     );
   }
 
-  return candidate as Candidate;
-}
+  const normalized = normalizeCandidate(candidate);
 
+  if (!normalized.id) {
+    throw new Error(
+      "Candidate was created, but the server did not return an ID. Check the backend create-candidate response.",
+    );
+  }
+
+  return normalized;
+}
 
 /*
 ========================================
@@ -654,8 +593,7 @@ export async function updateCandidate(
     await fetch(
       `${API_URL}/${id}`,
       {
-        method:
-          "PUT",
+        method: "PUT",
 
         headers: {
           "Content-Type":
@@ -674,38 +612,19 @@ export async function updateCandidate(
       response,
     );
 
-  const updatedCandidate =
-    data?.data ??
-    data;
+  const updatedCandidate = extractCandidate(data);
 
   if (
     !updatedCandidate ||
-    typeof updatedCandidate !==
-      "object"
+    typeof updatedCandidate !== "object"
   ) {
     throw new Error(
       "Updated candidate data was not returned.",
     );
   }
 
-  /*
-  Normalize MongoDB _id
-  */
-
-  if (
-    !updatedCandidate.id &&
-    updatedCandidate._id
-  ) {
-    updatedCandidate.id =
-      typeof updatedCandidate._id ===
-      "string"
-        ? updatedCandidate._id
-        : updatedCandidate._id.toString();
-  }
-
-  return updatedCandidate as Candidate;
+  return normalizeCandidate(updatedCandidate);
 }
-
 
 /*
 ========================================
@@ -727,7 +646,6 @@ export async function updateCandidateStatus(
   );
 }
 
-
 /*
 ========================================
 DELETE CANDIDATE
@@ -739,15 +657,13 @@ export async function deleteCandidate(
   id: string,
 ): Promise<{
   success: boolean;
-
   message?: string;
 }> {
   const response =
     await fetch(
       `${API_URL}/${id}`,
       {
-        method:
-          "DELETE",
+        method: "DELETE",
       },
     );
 

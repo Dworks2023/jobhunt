@@ -288,6 +288,39 @@ if (Array.isArray(data)) {
   const enrollmentTrend = useMemo(() => {
     const monthlyData: Record<string, number> = {};
 
+    // Show the last 6 months, including months
+    // with zero enrollments.
+    const now = new Date();
+
+    const months: {
+      key: string;
+      month: string;
+    }[] = [];
+
+    for (let i = 5; i >= 0; i--) {
+      const date = new Date(
+        now.getFullYear(),
+        now.getMonth() - i,
+        1,
+      );
+
+      const key = `${date.getFullYear()}-${String(
+        date.getMonth() + 1,
+      ).padStart(2, "0")}`;
+
+      const month = date.toLocaleDateString(
+        "en-US",
+        {
+          month: "short",
+          year: "numeric",
+        },
+      );
+
+      months.push({ key, month });
+      monthlyData[key] = 0;
+    }
+
+    // Count candidates by their enrollment start date.
     candidates.forEach((candidate) => {
       if (!candidate.startDate) {
         return;
@@ -299,34 +332,20 @@ if (Array.isArray(data)) {
         return;
       }
 
-      const month = date.toLocaleDateString(
-        "en-US",
-        {
-          month: "short",
-          year: "numeric",
-        },
-      );
+      const key = `${date.getFullYear()}-${String(
+        date.getMonth() + 1,
+      ).padStart(2, "0")}`;
 
-      monthlyData[month] =
-        (monthlyData[month] || 0) + 1;
+      // Count only enrollments in the displayed period.
+      if (key in monthlyData) {
+        monthlyData[key] += 1;
+      }
     });
 
-    return Object.entries(monthlyData)
-      .map(([month, enrollments]) => ({
-        month,
-        enrollments,
-      }))
-      .sort((a, b) => {
-        const dateA = new Date(
-          `1 ${a.month}`,
-        ).getTime();
-
-        const dateB = new Date(
-          `1 ${b.month}`,
-        ).getTime();
-
-        return dateA - dateB;
-      });
+    return months.map(({ key, month }) => ({
+      month,
+      enrollments: monthlyData[key],
+    }));
   }, [candidates]);
 
   /*
@@ -484,76 +503,92 @@ const interviewDomainData = useMemo(() => {
 
           <CardContent className="h-[280px]">
             {enrollmentTrend.length > 0 ? (
-              <ResponsiveContainer
-                width="100%"
-                height="100%"
-              >
-                <AreaChart
-                  data={enrollmentTrend}
-                >
-                  <defs>
-                    <linearGradient
-                      id="enrollmentGradient"
-                      x1="0"
-                      y1="0"
-                      x2="0"
-                      y2="1"
-                    >
-                      <stop
-                        offset="0%"
-                        stopColor="var(--color-primary)"
-                        stopOpacity={0.35}
-                      />
+              
+<ResponsiveContainer width="100%" height="100%">
+  <AreaChart
+    data={enrollmentTrend}
+    margin={{
+      top: 15,
+      right: 15,
+      left: 0,
+      bottom: 5,
+    }}
+  >
+    <defs>
+      <linearGradient
+        id="enrollmentGradient"
+        x1="0"
+        y1="0"
+        x2="0"
+        y2="1"
+      >
+        <stop
+          offset="0%"
+          stopColor="var(--color-primary)"
+          stopOpacity={0.35}
+        />
 
-                      <stop
-                        offset="100%"
-                        stopColor="var(--color-primary)"
-                        stopOpacity={0.02}
-                      />
-                    </linearGradient>
-                  </defs>
+        <stop
+          offset="100%"
+          stopColor="var(--color-primary)"
+          stopOpacity={0.02}
+        />
+      </linearGradient>
+    </defs>
 
-                  <CartesianGrid
-                    vertical={false}
-                    stroke="var(--color-border)"
-                  />
+    <CartesianGrid
+      vertical={false}
+      stroke="var(--color-border)"
+    />
 
-                  <XAxis
-                    dataKey="month"
-                    stroke="var(--color-muted-foreground)"
-                    fontSize={12}
-                    tickLine={false}
-                    axisLine={false}
-                  />
+    <XAxis
+      dataKey="month"
+      stroke="var(--color-muted-foreground)"
+      fontSize={12}
+      tickLine={false}
+      axisLine={false}
+      interval={0}
+    />
 
-                  <YAxis
-                    allowDecimals={false}
-                    stroke="var(--color-muted-foreground)"
-                    fontSize={12}
-                    tickLine={false}
-                    axisLine={false}
-                  />
+    <YAxis
+      allowDecimals={false}
+      domain={[0, "auto"]}
+      stroke="var(--color-muted-foreground)"
+      fontSize={12}
+      tickLine={false}
+      axisLine={false}
+    />
 
-                  <Tooltip
-                    contentStyle={{
-                      background:
-                        "var(--color-background)",
-                      border:
-                        "1px solid var(--color-border)",
-                      borderRadius: 12,
-                      fontSize: 12,
-                    }}
-                  />
+    <Tooltip
+      contentStyle={{
+        background: "var(--color-background)",
+        border: "1px solid var(--color-border)",
+        borderRadius: 12,
+        fontSize: 12,
+      }}
+      formatter={(value) => [
+        `${value} enrollments`,
+        "Total",
+      ]}
+    />
 
-                  <Area
-                    type="monotone"
-                    dataKey="enrollments"
-                    stroke="var(--color-primary)"
-                    strokeWidth={2.5}
-                    fill="url(#enrollmentGradient)"
-                  />
-                </AreaChart>
-              </ResponsiveContainer>
+    <Area
+      type="monotone"
+      dataKey="enrollments"
+      stroke="var(--color-primary)"
+      strokeWidth={2.5}
+      fill="url(#enrollmentGradient)"
+      dot={{
+        r: 4,
+        fill: "var(--color-primary)",
+        strokeWidth: 2,
+      }}
+      activeDot={{
+        r: 6,
+      }}
+    />
+  </AreaChart>
+</ResponsiveContainer>
             ) : (
               <div className="flex h-full items-center justify-center">
                 <p className="text-sm text-muted-foreground">

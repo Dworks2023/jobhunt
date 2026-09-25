@@ -1995,34 +1995,40 @@ async function handleMARUpload() {
 
     return (
       <Layout
-        title="Candidate unavailable"
-        subtitle="The requested candidate could not be found"
+  title="Candidate unavailable"
+  subtitle="The requested candidate could not be found"
+>
+  <Card>
+    <CardContent className="p-8 text-center">
+      <h2 className="text-lg font-semibold">
+        Candidate not found
+      </h2>
+
+      <p className="mt-2 text-sm text-muted-foreground">
+        {error ||
+          "This candidate does not exist in the database."}
+      </p>
+
+      <Button
+        variant="outline"
+        size="default"
+        className="group mt-6 h-11 rounded-xl border-border/70 bg-card px-4 shadow-sm transition-all duration-200 hover:-translate-x-0.5 hover:border-primary/40 hover:bg-primary/5 hover:text-primary hover:shadow-md"
+        asChild
       >
-        <Card>
-          <CardContent className="p-8 text-center">
+        <Link
+  to="/candidates"
+  className="group mt-6 inline-flex h-12 items-center gap-3 rounded-xl border-2 border-emerald-500/40 bg-emerald-500/10 px-5 text-sm font-semibold text-emerald-400 shadow-md transition-all duration-200 hover:-translate-y-0.5 hover:border-emerald-400 hover:bg-emerald-500 hover:text-white hover:shadow-lg"
+>
+  <span className="flex size-8 items-center justify-center rounded-lg bg-emerald-500/20 transition-colors group-hover:bg-white/20">
+    <ArrowLeft className="size-5 transition-transform group-hover:-translate-x-1" />
+  </span>
 
-            <h2 className="text-lg font-semibold">
-              Candidate not found
-            </h2>
-
-            <p className="mt-2 text-sm text-muted-foreground">
-              {error ||
-                "This candidate does not exist in the database."}
-            </p>
-
-            <Button
-              className="mt-5"
-              asChild
-            >
-              <Link to="/candidates">
-                <ArrowLeft className="size-4" />
-                Back to Candidates
-              </Link>
-            </Button>
-
-          </CardContent>
-        </Card>
-      </Layout>
+  <span>Back to Candidates</span>
+</Link>
+      </Button>
+    </CardContent>
+  </Card>
+</Layout>
     );
   }
 

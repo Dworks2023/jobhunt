@@ -41,10 +41,9 @@ import {
   plans,
 } from "../data";
 
-import type {
-  Candidate,
-  Status,
-} from "../data";
+
+import type React from "react";
+
 
 
 /* ============================================= */
@@ -331,57 +330,66 @@ const [
   /* LOAD CANDIDATES */
   /* ============================================= */
 
- async function loadCandidates() {
+async function loadCandidates() {
   try {
     setLoadingCandidates(true);
-
     setError("");
 
-    const data = await getCandidates();
+    const response = await getCandidates();
 
     // Safety check: API must return an array
-    if (!Array.isArray(data)) {
+    if (!Array.isArray(response)) {
       console.error(
         "Candidates API did not return an array:",
-        data,
+        response
       );
 
-      setLocalCandidates([]);
+      setError("Invalid candidates data received from API");
 
-      setCandidateStatuses({});
-
+      // Keep existing candidates instead of clearing them
       return;
     }
 
+    // Normalize candidate IDs and preserve API order
+    const normalizedCandidates = response.map(
+      (candidate: Candidate) => ({
+        ...candidate,
+        id: String(candidate.id ?? candidate._id ?? ""),
+      })
+    );
+
+    // Remove candidates without valid IDs
+    const validCandidates = normalizedCandidates.filter(
+      (candidate: Candidate) => candidate.id !== ""
+    );
+
     // Store candidates
-    setLocalCandidates(data);
+    setLocalCandidates(validCandidates);
 
     // Create status map for all candidates
     const statusMap = Object.fromEntries(
-      data.map((candidate: Candidate) => [
+      validCandidates.map((candidate: Candidate) => [
         candidate.id,
         candidate.status,
-      ]),
+      ])
     ) as Record<string, Status>;
 
     // Store candidate statuses
     setCandidateStatuses(statusMap);
+
   } catch (error) {
     console.error(
       "Failed to load candidates:",
-      error,
+      error
     );
 
-    // Clear invalid/old data if loading fails
-    setLocalCandidates([]);
-
-    setCandidateStatuses({});
-
+    // Do not clear existing candidates on API failure
     setError(
       error instanceof Error
         ? error.message
-        : "Failed to load candidates",
+        : "Failed to load candidates"
     );
+
   } finally {
     setLoadingCandidates(false);
   }
@@ -737,12 +745,24 @@ function getProgramEndDate(
       );
     }
 
-    setLocalCandidates(
-      (current) => [
-        ...current,
-        newCandidate as Candidate,
-      ],
-    );
+    setLocalCandidates((current) => {
+  // Prevent duplicate candidates
+  const alreadyExists = current.some(
+    (candidate) =>
+      String(candidate.id) ===
+      String(newCandidate.id),
+  );
+
+  if (alreadyExists) {
+    return current;
+  }
+
+  // Append the new candidate at the bottom
+  return [
+    ...current,
+    newCandidate as Candidate,
+  ];
+});
 
     // Keep status state updated
     setCandidateStatuses(
@@ -1860,17 +1880,54 @@ assignedSpecialist:
       {/* IMPORT CANDIDATES */}
       {/* ============================================= */}
 
-      <ImportCandidatesDialog
-        open={showImportModal}
-        onClose={() =>
-          setShowImportModal(
-            false,
-          )
+    <ImportCandidatesDialog
+  open={showImportModal}
+  onClose={() => setShowImportModal(false)}
+  onImported={(importedCandidates: Candidate[]) => {
+    setLocalCandidates((current) => {
+      const existingIds = new Set(
+        current.map((candidate) =>
+          String(candidate.id)
+        )
+      );
+
+      const existingEmails = new Set(
+        current.map((candidate) =>
+          candidate.email?.trim().toLowerCase()
+        )
+      );
+
+      const newCandidates = importedCandidates.filter(
+        (candidate) => {
+          const id = String(candidate.id);
+          const email = candidate.email?.trim().toLowerCase();
+
+          if (!id || id === "undefined" || id === "null") {
+            return false;
+          }
+
+          if (existingIds.has(id)) {
+            return false;
+          }
+
+          if (email && existingEmails.has(email)) {
+            return false;
+          }
+
+          existingIds.add(id);
+
+          if (email) {
+            existingEmails.add(email);
+          }
+
+          return true;
         }
-        onImported={
-          loadCandidates
-        }
-      />
+      );
+
+      return [...current, ...newCandidates];
+    });
+  }}
+/>
      
 
     </>
