@@ -1,16 +1,19 @@
+
 import {
   Activity,
   AlarmClock,
   ArrowRight,
   CheckCircle2,
-  Coins,
   Users,
 } from "lucide-react";
 
 import {
   Area,
   AreaChart,
+  Bar,
+  BarChart,
   CartesianGrid,
+  Cell,
   ResponsiveContainer,
   Tooltip,
   XAxis,
@@ -34,6 +37,17 @@ import {
 
 import { getCandidates } from "../api/candidate";
 
+type UploadedReport = {
+  _id?: string;
+  type?: string;
+  company?: string;
+  role?: string;
+  reportType?: string;
+  fileUrl?: string;
+  uploadedAt?: string;
+  date?: string;
+};
+
 type Candidate = {
   _id?: string;
   id: string;
@@ -53,7 +67,21 @@ type Candidate = {
   daysRemaining?: number;
 
   createdAt?: string | Date;
+
+  // Interview analytics
+ uploadedReports?: UploadedReport[];
 };
+
+const DOMAIN_CHART_COLORS = [
+  "#3B82F6",
+  "#8B5CF6",
+  "#10B981",
+  "#F59E0B",
+  "#EC4899",
+  "#06B6D4",
+  "#F97316",
+  "#A855F7",
+];
 
 export default function Dashboard() {
   const navigate = useNavigate();
@@ -74,18 +102,30 @@ export default function Dashboard() {
         setLoading(true);
         setError("");
 
-        const data = await getCandidates();
+       
+const data = await getCandidates();
 
-        if (Array.isArray(data)) {
-          setCandidates(data);
-        } else {
-          console.error(
-            "Unexpected candidates response:",
-            data,
-          );
+// TEMPORARY: inspect actual candidate data
+console.log(
+  "Dashboard candidate API response:",
+  data,
+);
 
-          setCandidates([]);
-        }
+if (Array.isArray(data)) {
+  console.log(
+    "First candidate data:",
+    data[0],
+  );
+
+  setCandidates(data);
+} else {
+  console.error(
+    "Unexpected candidates response:",
+    data,
+  );
+
+  setCandidates([]);
+}
       } catch (error) {
         console.error(
           "Failed to load dashboard:",
@@ -127,8 +167,7 @@ export default function Dashboard() {
     const expiring = candidates.filter(
       (candidate) =>
         candidate.status === "Expiring Soon" ||
-        Number(candidate.daysRemaining ?? 0) <
-          30,
+        Number(candidate.daysRemaining ?? 0) < 30,
     ).length;
 
     const creditsTotal = candidates.reduce(
@@ -141,9 +180,7 @@ export default function Dashboard() {
     const creditsRemaining = candidates.reduce(
       (totalCredits, candidate) =>
         totalCredits +
-        Number(
-          candidate.creditsRemaining ?? 0,
-        ),
+        Number(candidate.creditsRemaining ?? 0),
       0,
     );
 
@@ -192,7 +229,6 @@ export default function Dashboard() {
       delta: "Under 30 days left",
       tone: "text-warning",
     },
-    
   ];
 
   /*
@@ -208,15 +244,11 @@ export default function Dashboard() {
     return [...candidates]
       .sort((a, b) => {
         const dateA = new Date(
-          a.createdAt ||
-            a.startDate ||
-            0,
+          a.createdAt || a.startDate || 0,
         ).getTime();
 
         const dateB = new Date(
-          b.createdAt ||
-            b.startDate ||
-            0,
+          b.createdAt || b.startDate || 0,
         ).getTime();
 
         return dateB - dateA;
@@ -234,21 +266,13 @@ export default function Dashboard() {
     return candidates
       .filter((candidate) => {
         const isExpiring =
-          candidate.status ===
-            "Expiring Soon" ||
-          Number(
-            candidate.daysRemaining ?? 999,
-          ) < 30;
+          candidate.status === "Expiring Soon" ||
+          Number(candidate.daysRemaining ?? 999) < 30;
 
         const hasLowCredits =
-          Number(
-            candidate.creditsRemaining ?? 999,
-          ) < 25;
+          Number(candidate.creditsRemaining ?? 999) < 25;
 
-        return (
-          isExpiring ||
-          hasLowCredits
-        );
+        return isExpiring || hasLowCredits;
       })
       .slice(0, 4);
   }, [candidates]);
@@ -262,19 +286,14 @@ export default function Dashboard() {
   */
 
   const enrollmentTrend = useMemo(() => {
-    const monthlyData: Record<
-      string,
-      number
-    > = {};
+    const monthlyData: Record<string, number> = {};
 
     candidates.forEach((candidate) => {
       if (!candidate.startDate) {
         return;
       }
 
-      const date = new Date(
-        candidate.startDate,
-      );
+      const date = new Date(candidate.startDate);
 
       if (Number.isNaN(date.getTime())) {
         return;
@@ -312,6 +331,73 @@ export default function Dashboard() {
 
   /*
   ========================================
+  INTERVIEW CALLS BY DOMAIN
+
+  Groups interview calls by candidate domain.
+
+  Uses individual interview records when
+  available. Otherwise uses interviewCalls.
+
+  IMPORTANT:
+  These fields must be returned by the
+  backend for actual data to appear.
+  ========================================
+  */
+
+  
+const interviewDomainData = useMemo(() => {
+  const domainTotals: Record<string, number> = {};
+
+  candidates.forEach((candidate) => {
+    const domain = candidate.domain?.trim();
+
+    if (!domain) {
+      return;
+    }
+
+    // Read existing Candidate Details uploads.
+    const uploadedReports = Array.isArray(
+      candidate.uploadedReports,
+    )
+      ? candidate.uploadedReports
+      : [];
+
+    // Count only interview call uploads,
+    // not regular reports.
+    const interviewCalls = uploadedReports.filter(
+      (report) =>
+        report.type?.trim().toLowerCase() ===
+        "interview call",
+    );
+
+    const interviewCount = interviewCalls.length;
+
+    // Normalize domain casing to combine
+    // candidates in the same domain.
+    const existingDomain = Object.keys(
+      domainTotals,
+    ).find(
+      (key) =>
+        key.toLowerCase() === domain.toLowerCase(),
+    );
+
+    const finalDomain = existingDomain || domain;
+
+    domainTotals[finalDomain] =
+      (domainTotals[finalDomain] || 0) +
+      interviewCount;
+  });
+
+  return Object.entries(domainTotals)
+    .map(([domain, calls]) => ({
+      domain,
+      calls,
+    }))
+    .sort((a, b) => b.calls - a.calls);
+}, [candidates]);
+
+  /*
+  ========================================
   LOADING STATE
   ========================================
   */
@@ -330,6 +416,12 @@ export default function Dashboard() {
       </Layout>
     );
   }
+
+  /*
+  ========================================
+  DASHBOARD UI
+  ========================================
+  */
 
   return (
     <Layout
@@ -378,7 +470,7 @@ export default function Dashboard() {
         })}
       </div>
 
-      {/* CHART + ATTENTION */}
+      {/* ENROLLMENT CHART + NEEDS ATTENTION */}
 
       <div className="mt-5 grid gap-5 lg:grid-cols-3">
         {/* ENROLLMENT CHART */}
@@ -483,65 +575,197 @@ export default function Dashboard() {
 
           <CardContent className="space-y-4">
             {attention.length > 0 ? (
-              attention.map(
-                (candidate) => (
-                  <Link
-                    key={
-                      candidate._id ||
-                      candidate.id
-                    }
-                    to={`/candidates/${candidate.id}`}
-                    className="block rounded-xl border p-3 transition-colors hover:bg-accent/50"
-                  >
-                    <div className="flex items-center justify-between gap-2">
-                      <p className="text-sm font-medium">
-                        {candidate.name}
-                      </p>
-
-                      <StatusBadge
-                        status={
-                          candidate.status ||
-                          "Active"
-                        }
-                      />
-                    </div>
-
-                    <p className="mt-1 text-xs text-muted-foreground">
-                      {candidate.daysRemaining ??
-                        0}{" "}
-                      days left ·{" "}
-                      {candidate.creditsRemaining ??
-                        0}{" "}
-                      credits
+              attention.map((candidate) => (
+                <Link
+                  key={
+                    candidate._id ||
+                    candidate.id
+                  }
+                  to={`/candidates/${candidate.id}`}
+                  className="block rounded-xl border p-3 transition-colors hover:bg-accent/50"
+                >
+                  <div className="flex items-center justify-between gap-2">
+                    <p className="text-sm font-medium">
+                      {candidate.name}
                     </p>
 
-                    <Progress
-                      value={
-                        candidate.creditsTotal
-                          ? (Number(
-                              candidate.creditsRemaining ??
-                                0,
-                            ) /
-                              Number(
-                                candidate.creditsTotal,
-                              )) *
-                            100
-                          : 0
+                    <StatusBadge
+                      status={
+                        candidate.status ||
+                        "Active"
                       }
-                      className="mt-2 h-1.5"
                     />
-                  </Link>
-                ),
-              )
+                  </div>
+
+                  <p className="mt-1 text-xs text-muted-foreground">
+                    {candidate.daysRemaining ?? 0}{" "}
+                    days left ·{" "}
+                    {candidate.creditsRemaining ?? 0}{" "}
+                    credits
+                  </p>
+
+                  <Progress
+                    value={
+                      candidate.creditsTotal
+                        ? (Number(
+                            candidate.creditsRemaining ?? 0,
+                          ) /
+                            Number(
+                              candidate.creditsTotal,
+                            )) *
+                          100
+                        : 0
+                    }
+                    className="mt-2 h-1.5"
+                  />
+                </Link>
+              ))
             ) : (
               <p className="text-sm text-muted-foreground">
-                No candidates need attention right
-                now.
+                No candidates need attention right now.
               </p>
             )}
           </CardContent>
         </Card>
       </div>
+
+      {/* =======================================
+          INTERVIEW CALLS BY DOMAIN
+          NEW FULL-WIDTH GRAPH
+          Placed below enrollment/attention
+          and above Recent enrollments
+      ======================================= */}
+
+      <Card className="mt-5">
+        <CardHeader>
+          <div>
+            <CardTitle>
+              Interview Calls by Domain
+            </CardTitle>
+
+            <p className="mt-1 text-sm text-muted-foreground">
+              Total interview calls received by candidates
+              in each domain
+            </p>
+          </div>
+        </CardHeader>
+
+        <CardContent className="h-[340px]">
+          {interviewDomainData.some(
+            (item) => item.calls > 0,
+          ) ? (
+            <ResponsiveContainer
+              width="100%"
+              height="100%"
+            >
+              <BarChart
+                data={interviewDomainData}
+                margin={{
+                  top: 20,
+                  right: 20,
+                  left: 10,
+                  bottom: 10,
+                }}
+              >
+                <CartesianGrid
+                  stroke="var(--color-border)"
+                  strokeDasharray="3 3"
+                  vertical={false}
+                />
+
+                <XAxis
+                  dataKey="domain"
+                  stroke="var(--color-muted-foreground)"
+                  fontSize={12}
+                  tickLine={false}
+                  axisLine={false}
+                  interval={0}
+                  angle={-15}
+                  textAnchor="end"
+                  height={65}
+                />
+
+                <YAxis
+                  allowDecimals={false}
+                  domain={[0, "auto"]}
+                  stroke="var(--color-muted-foreground)"
+                  fontSize={12}
+                  tickLine={false}
+                  axisLine={false}
+                  label={{
+                    value: "Interview Calls",
+                    angle: -90,
+                    position: "insideLeft",
+                    style: {
+                      fill: "var(--color-muted-foreground)",
+                      fontSize: 12,
+                    },
+                  }}
+                />
+
+                <Tooltip
+                  cursor={{
+                    fill: "var(--color-muted)",
+                    opacity: 0.2,
+                  }}
+                  contentStyle={{
+                    background:
+                      "var(--color-background)",
+                    border:
+                      "1px solid var(--color-border)",
+                    borderRadius: 12,
+                    fontSize: 12,
+                  }}
+                  formatter={(value) => [
+                    `${value} interview calls`,
+                    "Total",
+                  ]}
+                  labelFormatter={(label) =>
+                    `Domain: ${label}`
+                  }
+                />
+
+                <Bar
+                  dataKey="calls"
+                  name="Interview Calls"
+                  radius={[5, 5, 0, 0]}
+                  maxBarSize={60}
+                  label={{
+                    position: "top",
+                    fill: "var(--color-foreground)",
+                    fontSize: 12,
+                  }}
+                >
+                  {interviewDomainData.map(
+                    (entry, index) => (
+                      <Cell
+                        key={entry.domain}
+                        fill={
+                          DOMAIN_CHART_COLORS[
+                            index %
+                              DOMAIN_CHART_COLORS.length
+                          ]
+                        }
+                      />
+                    ),
+                  )}
+                </Bar>
+              </BarChart>
+            </ResponsiveContainer>
+          ) : (
+            <div className="flex h-full flex-col items-center justify-center gap-2">
+              <p className="text-sm font-medium text-muted-foreground">
+                No interview call data available.
+              </p>
+
+              <p className="text-xs text-muted-foreground text-center">
+                Interview records will appear here once
+                they are available for your candidates.
+              </p>
+            </div>
+          )}
+        </CardContent>
+      </Card>
 
       {/* RECENT ENROLLMENTS */}
 
@@ -592,54 +816,49 @@ export default function Dashboard() {
               </thead>
 
               <tbody>
-                {recent.map(
-                  (candidate) => (
-                    <tr
-                      key={
-                        candidate._id ||
-                        candidate.id
-                      }
-                      className="border-b last:border-0 hover:bg-accent/40"
-                    >
-                      <td className="px-6 py-3">
-                        <Link
-                          to={`/candidates/${candidate.id}`}
-                          className="font-medium hover:text-primary"
-                        >
-                          {candidate.name}
-                        </Link>
+                {recent.map((candidate) => (
+                  <tr
+                    key={
+                      candidate._id ||
+                      candidate.id
+                    }
+                    className="border-b last:border-0 hover:bg-accent/40"
+                  >
+                    <td className="px-6 py-3">
+                      <Link
+                        to={`/candidates/${candidate.id}`}
+                        className="font-medium hover:text-primary"
+                      >
+                        {candidate.name}
+                      </Link>
 
-                        <p className="text-xs text-muted-foreground">
-                          {candidate.id}
-                        </p>
-                      </td>
+                      <p className="text-xs text-muted-foreground">
+                        {candidate.id}
+                      </p>
+                    </td>
 
-                      <td className="px-6 py-3 text-muted-foreground">
-                        {candidate.domain ||
-                          "-"}
-                      </td>
+                    <td className="px-6 py-3 text-muted-foreground">
+                      {candidate.domain || "-"}
+                    </td>
 
-                      <td className="px-6 py-3">
-                        {candidate.plan ||
-                          "-"}
-                      </td>
+                    <td className="px-6 py-3">
+                      {candidate.plan || "-"}
+                    </td>
 
-                      <td className="px-6 py-3 text-muted-foreground">
-                        {candidate.startDate ||
-                          "-"}
-                      </td>
+                    <td className="px-6 py-3 text-muted-foreground">
+                      {candidate.startDate || "-"}
+                    </td>
 
-                      <td className="px-6 py-3">
-                        <StatusBadge
-                          status={
-                            candidate.status ||
-                            "Active"
-                          }
-                        />
-                      </td>
-                    </tr>
-                  ),
-                )}
+                    <td className="px-6 py-3">
+                      <StatusBadge
+                        status={
+                          candidate.status ||
+                          "Active"
+                        }
+                      />
+                    </td>
+                  </tr>
+                ))}
 
                 {recent.length === 0 && (
                   <tr>

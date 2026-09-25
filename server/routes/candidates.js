@@ -353,6 +353,56 @@ function generateApplicationId() {
 
 /*
 |--------------------------------------------------------------------------
+| HELPER - CALCULATE DAYS LEFT
+|--------------------------------------------------------------------------
+|
+| Every UNIQUE application date consumes 1 program day.
+|
+| Example:
+|
+| Program Days = 45
+|
+| Sep 21 → 10 applications
+| Sep 21 → 5 applications
+| Sep 22 → 8 applications
+|
+| Unique dates = 2
+| Days Left = 45 - 2 = 43
+|
+|--------------------------------------------------------------------------
+*/
+
+function calculateDaysRemaining(candidate) {
+  const programDays =
+    Number(candidate.programDays) || 0;
+
+  const applicationHistory =
+    Array.isArray(
+      candidate.applicationHistory,
+    )
+      ? candidate.applicationHistory
+      : [];
+
+  const uniqueApplicationDates =
+    new Set(
+      applicationHistory
+        .map((item) =>
+          String(item?.date || "").trim(),
+        )
+        .filter(Boolean),
+    );
+
+  const daysUsed =
+    uniqueApplicationDates.size;
+
+  return Math.max(
+    programDays - daysUsed,
+    0,
+  );
+}
+
+/*
+|--------------------------------------------------------------------------
 | GET ALL CANDIDATES
 |--------------------------------------------------------------------------
 |
@@ -366,15 +416,27 @@ router.get("/", async (req, res) => {
     const db = getDatabase();
 
     const candidates = await db
-      .collection("candidates")
-      .find({})
-      .sort({
-        createdAt: 1,
-        _id: 1,
-      })
-      .toArray();
+  .collection("candidates")
+  .find({})
+  .sort({
+    createdAt: 1,
+    _id: 1,
+  })
+  .toArray();
 
-    return res.json(candidates);
+const candidatesWithDays =
+  candidates.map((candidate) => ({
+    ...candidate,
+
+    daysRemaining:
+      calculateDaysRemaining(
+        candidate,
+      ),
+  }));
+
+return res.json(
+  candidatesWithDays,
+);
   } catch (error) {
     console.error(
       "Error fetching candidates:",
@@ -416,6 +478,12 @@ router.post("/", async (req, res) => {
     const creditsRemaining =
       creditsTotal;
 
+      const programDays =
+  Math.max(
+    Number(body.programDays) || 0,
+    0,
+  );
+
     /*
     GENERATE CANDIDATE ID
     */
@@ -429,13 +497,17 @@ router.post("/", async (req, res) => {
     const now = new Date();
 
     const newCandidate = {
-      ...body,
+  ...body,
 
-      id: candidateId,
+  id: candidateId,
 
-      plan: selectedPlan,
+  plan: selectedPlan,
 
-      creditsTotal,
+  programDays,
+
+  daysRemaining: programDays,
+
+  creditsTotal,
 
       creditsRemaining,
 
@@ -900,6 +972,18 @@ router.post(
 
           plan,
 
+          programDays:
+  Math.max(
+    Number(normalizedRow.programdays) || 0,
+    0,
+  ),
+
+daysRemaining:
+  Math.max(
+    Number(normalizedRow.programdays) || 0,
+    0,
+  ),
+
           creditsTotal:
             credits,
 
@@ -1338,6 +1422,12 @@ router.post(
         fileType:
           req.file.mimetype,
 
+       uploadedBy: String(
+  req.body.uploadedBy || ""
+).trim(),
+
+  
+
         createdAt: new Date(),
       };
 
@@ -1524,7 +1614,8 @@ router.post(
           req.file.mimetype,
 
         fileFormat,
-
+updatedBy:
+  String(req.body.updatedBy || "").trim(),
         createdAt: new Date(),
       };
 
@@ -1986,6 +2077,18 @@ router.post(
           0,
         );
 
+        /*
+|--------------------------------------------------------------------------
+| RECALCULATE PROGRAM DAYS
+|--------------------------------------------------------------------------
+*/
+
+const daysRemaining =
+  calculateDaysRemaining({
+    ...candidate,
+    applicationHistory,
+  });
+
       /*
       UPDATE DATABASE
       */
@@ -1997,15 +2100,17 @@ router.post(
             query,
             {
               $set: {
-                applicationHistory,
+  applicationHistory,
 
-                creditsUsed,
+  creditsUsed,
 
-                creditsRemaining,
+  creditsRemaining,
 
-                updatedAt:
-                  new Date(),
-              },
+  daysRemaining,
+
+  updatedAt:
+    new Date(),
+},
             },
             {
               returnDocument: "after",
@@ -2022,19 +2127,21 @@ router.post(
       }
 
       return res.status(201).json({
-        success: true,
+  success: true,
 
-        message:
-          "Applications updated successfully.",
+  message:
+    "Applications updated successfully.",
 
-        data: savedEntry,
+  data: savedEntry,
 
-        creditsTotal,
+  creditsTotal,
 
-        creditsUsed,
+  creditsUsed,
 
-        creditsRemaining,
-      });
+  creditsRemaining,
+
+  daysRemaining,
+});
     } catch (error) {
       console.error(
         "Error saving applications:",
@@ -2074,14 +2181,25 @@ router.get(
         req.params.candidateId,
       );
 
-      if (!candidate) {
-        return res.status(404).json({
-          message:
-            "Candidate not found.",
-        });
-      }
+     if (!candidate) {
+  return res.status(404).json({
+    message:
+      "Candidate not found.",
+  });
+}
 
-      return res.json(candidate);
+const candidateWithDays = {
+  ...candidate,
+
+  daysRemaining:
+    calculateDaysRemaining(
+      candidate,
+    ),
+};
+
+return res.json(
+  candidateWithDays,
+);
     } catch (error) {
       console.error(
         "Error fetching candidate:",
@@ -2198,8 +2316,32 @@ async function updateCandidateHandler(
 
         updates.applicationHistory =
           [];
+
+          updates.daysRemaining =
+  Number(
+    updates.programDays ??
+      existingCandidate.programDays,
+  ) || 0;
       }
     }
+
+
+    if (updates.programDays !== undefined) {
+  updates.programDays = Math.max(
+    Number(updates.programDays) || 0,
+    0,
+  );
+
+  const candidateWithUpdatedProgramDays = {
+    ...existingCandidate,
+    ...updates,
+  };
+
+  updates.daysRemaining =
+    calculateDaysRemaining(
+      candidateWithUpdatedProgramDays,
+    );
+}
 
     const result =
       await db

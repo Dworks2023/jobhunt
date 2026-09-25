@@ -74,3 +74,64 @@ export async function createCandidate(candidate: any) {
 
   return data.data;
 }
+
+
+// Upload Daily MAR with manually entered Updated By name
+export async function uploadMARReport(candidateId, file, updatedBy) {
+  const formData = new FormData();
+
+  formData.append("file", file);
+  formData.append("updatedBy", updatedBy);
+
+  const response = await fetch(
+    `${API_URL}/${candidateId}/mar`,
+    {
+      method: "POST",
+      body: formData,
+    }
+  );
+
+  const data = await response.json();
+
+  if (!response.ok) {
+    throw new Error(data.message || "Failed to upload MAR");
+  }
+
+  return data.data;
+}
+
+// Upload Reports / Interview Calls with manually entered Uploaded By name
+export async function uploadCandidateReport(
+  candidateId,
+  file,
+  uploadedBy,
+  type,
+  company = "",
+  role = "",
+  reportType = ""
+) {
+  const formData = new FormData();
+
+  formData.append("file", file);
+  formData.append("uploadedBy", uploadedBy);
+  formData.append("type", type);
+  formData.append("company", company);
+  formData.append("role", role);
+  formData.append("reportType", reportType);
+
+  const response = await fetch(
+    `${API_URL}/${candidateId}/reports`,
+    {
+      method: "POST",
+      body: formData,
+    }
+  );
+
+  const data = await response.json();
+
+  if (!response.ok) {
+    throw new Error(data.message || "Failed to upload report");
+  }
+
+  return data.data;
+}

@@ -7,6 +7,7 @@ import {
   Upload,
   UserPlus,
   X,
+  MoreVertical,
 } from "lucide-react";
 import {
   useEffect,
@@ -80,6 +81,8 @@ type Candidate = {
 
   plan?: string;
 
+  programDays?: number;
+
   assignedSpecialist?: string;
 
   startDate?: string;
@@ -104,6 +107,7 @@ type CandidateForm = {
   targetRole: string;
   experience: string;
   plan: string;
+  programDays: string;
   assignedSpecialist: string;
   startDate: string;
   status: Status;
@@ -133,6 +137,8 @@ function createEmptyForm(): CandidateForm {
     plan:
       plans[0]?.name ??
       "Basic",
+
+     programDays: "45", 
 
     assignedSpecialist: "",
 
@@ -241,6 +247,13 @@ export default function Candidates() {
     setShowDeleteModal,
   ] =
     useState(false);
+
+
+   // Three-dot actions menu
+const [
+  openActionMenu,
+  setOpenActionMenu,
+] = useState<string | null>(null); 
 
 
   /* ============================================= */
@@ -508,6 +521,52 @@ export default function Candidates() {
 }
 
 
+
+/* ============================================= */
+/* CALCULATE PROGRAM END DATE */
+/* ============================================= */
+
+function getProgramEndDate(
+  startDate?: string,
+  programDays?: number,
+): string {
+  if (!startDate || !programDays || programDays < 1) {
+    return "-";
+  }
+
+  // Parse as local date to avoid timezone shifts
+  const [year, month, day] = startDate
+    .slice(0, 10)
+    .split("-")
+    .map(Number);
+
+  if (!year || !month || !day) {
+    return "-";
+  }
+
+  const endDate = new Date(
+    year,
+    month - 1,
+    day,
+  );
+
+  // Program Days includes the start date
+  endDate.setDate(
+    endDate.getDate() + programDays - 1,
+  );
+
+  const endYear = endDate.getFullYear();
+  const endMonth = String(
+    endDate.getMonth() + 1,
+  ).padStart(2, "0");
+  const endDay = String(
+    endDate.getDate(),
+  ).padStart(2, "0");
+
+  return `${endYear}-${endMonth}-${endDay}`;
+}
+
+
   /* ============================================= */
   /* STATUS COLOR */
   /* ============================================= */
@@ -765,13 +824,19 @@ export default function Candidates() {
         "0-2 yrs",
 
       plan:
-        candidate.plan ??
-        plans[0]?.name ??
-        "Basic",
+  candidate.plan ??
+  plans[0]?.name ??
+  "Basic",
 
-      assignedSpecialist:
-        candidate.assignedSpecialist ??
-        "",
+programDays:
+  String(
+    candidate.programDays ??
+    45,
+  ),
+
+assignedSpecialist:
+  candidate.assignedSpecialist ??
+  "",
 
       startDate:
         candidate.startDate ??
@@ -1253,7 +1318,7 @@ export default function Candidates() {
 
             <div className="overflow-x-auto">
 
-              <table className="w-full min-w-[1180px] text-sm">
+              <table className="w-full min-w-[1450px] text-sm">
 
                 <thead>
 
@@ -1281,6 +1346,11 @@ export default function Candidates() {
 
                     <th className="px-5 py-3 font-medium">
                       Start Date
+                    </th>
+
+
+                    <th className="whitespace-nowrap px-5 py-3 font-medium">
+                    End Date
                     </th>
 
                     <th className="px-5 py-3 font-medium">
@@ -1311,7 +1381,7 @@ export default function Candidates() {
                     <tr>
 
                       <td
-                        colSpan={10}
+                        colSpan={11}
                         className="px-5 py-14 text-center text-muted-foreground"
                       >
 
@@ -1397,18 +1467,23 @@ export default function Candidates() {
                             </td>
 
 
-                            <td className="px-5 py-4 text-muted-foreground">
+                          {/* START DATE */}
+<td className="whitespace-nowrap px-5 py-4 text-muted-foreground">
+  {candidate.startDate || "-"}
+</td>
 
-                              {candidate.startDate || "-"}
+{/* END DATE */}
+<td className="whitespace-nowrap px-5 py-4 text-muted-foreground">
+  {getProgramEndDate(
+    candidate.startDate,
+    candidate.programDays,
+  )}
+</td>
 
-                            </td>
-
-
-                            <td className="px-5 py-4">
-
-                              {candidate.daysRemaining ?? "-"}
-
-                            </td>
+{/* DAYS LEFT */}
+<td className="whitespace-nowrap px-5 py-4">
+  {candidate.daysRemaining ?? "-"}
+</td>
 
 
                             <td className="px-5 py-4">
@@ -1465,77 +1540,75 @@ export default function Candidates() {
                             </td>
 
 
+                            
+
                             {/* ACTIONS */}
+<td className="px-5 py-4">
+  <div className="flex items-center justify-end gap-2">
 
-                            <td className="px-5 py-4">
+    {/* VIEW - ALWAYS VISIBLE */}
+    <Link
+      to={`/candidates/${identifier}`}
+      onClick={() => setOpenActionMenu(null)}
+    >
+      <Button
+        variant="ghost"
+        size="icon"
+        aria-label={`View ${candidate.name}`}
+      >
+        <Eye className="size-4" />
+      </Button>
+    </Link>
 
-                              <div className="flex items-center justify-end gap-1">
+    {/* THREE-DOT MENU */}
+    <div className="relative">
+      <button
+        type="button"
+        aria-label={`More actions for ${candidate.name}`}
+        onClick={() =>
+          setOpenActionMenu(
+            openActionMenu === candidate.id
+              ? null
+              : candidate.id
+          )
+        }
+        className="flex size-9 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground"
+      >
+        <MoreVertical size={20} strokeWidth={2} />
+      </button>
 
+      {openActionMenu === candidate.id && (
+        <div className="absolute right-0 top-full z-50 mt-2 w-36 rounded-lg border border-border bg-card p-1 shadow-xl">
 
-                                {/* VIEW */}
+          <button
+            type="button"
+            onClick={() => {
+              setOpenActionMenu(null);
+              openEditCandidate(candidate);
+            }}
+            className="flex w-full items-center gap-3 rounded-md px-3 py-2 text-sm text-foreground hover:bg-accent"
+          >
+            <Edit className="size-4" />
+            Edit
+          </button>
 
-                                <Link
-                                  to={`/candidates/${identifier}`}
-                                >
+          <button
+            type="button"
+            onClick={() => {
+              setOpenActionMenu(null);
+              openDeleteCandidate(candidate);
+            }}
+            className="flex w-full items-center gap-3 rounded-md px-3 py-2 text-sm text-destructive hover:bg-destructive/10"
+          >
+            <Trash2 className="size-4" />
+            Delete
+          </button>
 
-                                  <Button
-                                    variant="ghost"
-                                    size="icon"
-
-                                    aria-label={`View ${candidate.name}`}
-                                  >
-
-                                    <Eye className="size-4" />
-
-                                  </Button>
-
-                                </Link>
-
-
-                                {/* EDIT */}
-
-                                <Button
-                                  variant="ghost"
-                                  size="icon"
-
-                                  onClick={() =>
-                                    openEditCandidate(
-                                      candidate,
-                                    )
-                                  }
-
-                                  aria-label={`Edit ${candidate.name}`}
-                                >
-
-                                  <Edit className="size-4" />
-
-                                </Button>
-
-
-                                {/* DELETE */}
-
-                                <Button
-                                  variant="ghost"
-                                  size="icon"
-
-                                  onClick={() =>
-                                    openDeleteCandidate(
-                                      candidate,
-                                    )
-                                  }
-
-                                  aria-label={`Delete ${candidate.name}`}
-
-                                  className="text-destructive hover:text-destructive"
-                                >
-
-                                  <Trash2 className="size-4" />
-
-                                </Button>
-
-                              </div>
-
-                            </td>
+        </div>
+      )}
+    </div>
+  </div>
+</td>
 
                           </tr>
 
@@ -1551,7 +1624,7 @@ export default function Candidates() {
                       <tr>
 
                         <td
-                          colSpan={10}
+                          colSpan={11}
 
                           className="px-5 py-14 text-center text-muted-foreground"
                         >
@@ -2302,6 +2375,30 @@ function CandidateFormModal({
 
               </FormField>
 
+
+              <FormField
+  label="Program Days"
+  required
+>
+  <input
+    type="number"
+    min="1"
+    step="1"
+    value={formData.programDays}
+    onChange={(event) =>
+      setFormData(
+        (current) => ({
+          ...current,
+          programDays:
+            event.target.value,
+        }),
+      )
+    }
+    placeholder="Example: 45"
+    className={inputClass}
+  />
+</FormField>
+
             </div>
 
           </div>
@@ -2338,37 +2435,10 @@ function CandidateFormModal({
           </div>
 
 
+      
+
           {/* ACTIONS */}
 
-          <div className="mt-8 flex justify-end gap-3 border-t pt-6">
-
-            <Button
-              type="button"
-              variant="outline"
-
-              onClick={onClose}
-
-              disabled={saving}
-            >
-
-              Cancel
-
-            </Button>
-
-
-            <Button
-              type="submit"
-
-              disabled={saving}
-            >
-
-              {submitIcon}
-
-              {submitLabel}
-
-            </Button>
-
-          </div>
 
         </form>
 
