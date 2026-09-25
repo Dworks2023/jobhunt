@@ -236,6 +236,36 @@ function resolveFileUrl(
   return `${API_BASE_URL}/${fileUrl}`;
 }
 
+function getProgramEndDate(
+  startDate?: string,
+  programDays?: number,
+): string {
+  if (!startDate || !programDays || programDays < 1) {
+    return "-";
+  }
+
+  const [year, month, day] = startDate
+    .slice(0, 10)
+    .split("-")
+    .map(Number);
+
+  if (!year || !month || !day) {
+    return "-";
+  }
+
+  const endDate = new Date(year, month - 1, day);
+
+  // Include the start date as the first program day
+  endDate.setDate(endDate.getDate() + programDays - 1);
+
+  const endYear = endDate.getFullYear();
+  const endMonth = String(endDate.getMonth() + 1).padStart(2, "0");
+  const endDay = String(endDate.getDate()).padStart(2, "0");
+
+  return `${endYear}-${endMonth}-${endDay}`;
+}
+
+
 
 /*
 |--------------------------------------------------------------------------
@@ -2364,12 +2394,12 @@ const paginatedApplications = applicationHistory.slice(
             </div>
 
             <p className="mt-1 text-3xl font-semibold">
-              {totals.applications}
-            </p>
+  {creditsRemaining} / {creditsTotal}
+</p>
 
-            <p className="mt-3 text-xs text-muted-foreground">
-              Total submitted
-            </p>
+<p className="mt-3 text-xs text-muted-foreground">
+  Applications remaining / Total plan
+</p>
 
           </CardContent>
         </Card>
@@ -2780,7 +2810,11 @@ const paginatedApplications = applicationHistory.slice(
               </div>
 
               <p className="mt-2 break-words text-sm font-medium">
-                {c.endDate || "-"}
+                {c.endDate ||
+  getProgramEndDate(
+    c.startDate,
+    c.programDays
+  )}
               </p>
 
             </div>

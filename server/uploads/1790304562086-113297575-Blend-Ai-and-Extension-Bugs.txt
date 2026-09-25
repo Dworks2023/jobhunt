@@ -1,0 +1,17 @@
+Blend AI Bugs:
+
+After tailoring the resume in Standard, Deep, and Risk modes, weak action verbs are being added. For example, verbs like "acted," "used," and similar weak verbs are adding in the experience section.
+
+After resume tailoring, for some applications, metrics are not being added to the experience section.
+
+After resume tailoring, sometimes tech tools are being added directly into the bullet points in the experience section.
+
+The candidate has 3+ years of experience and is seeking a Python Full Stack Developer role, but Job Scout is showing 6+ years of experience based on CPI’s core technologies and development frameworks.The reason it is showing 6+ years is because the JD mentioned "2+ years of hands-on Scrum experience," and Job Scout considered that requirement while matching the job.
+
+Extension Bugs:
+
+UltiPro: When using the extension for the UltiPro screener, a login issue occurs. For example, after logging in with the email, the extension randomly picks the password and repeatedly attempts to use it. After multiple failed login attempts, it is showing the message Account may be blocked.
+
+Smart Recruiters: In this Screener, the "I am interested" option is clickable, but the application form is not getting filled .
+
+Workday: Login is successful using the email, but the application form is not getting filled.

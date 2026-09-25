@@ -1,0 +1,28 @@
+Bug Title: Resume Optimization – Incorrect Skill Categorization and Irrelevant Keyword Addition
+
+Description: During resume optimization in both Standard and Deep modes, the following issues have been identified:
+
+1. Irrelevant Job Description Keywords Added: The optimizer adds technical keyword directly from the job description to the resume in technical skills section.
+
+2. Incorrect Skill Categorization: Several technical skills are grouped under incorrect categories. 
+
+Examples include:
+
+* Data Quality & Delivery: Git, JIRA, Agile, Scrum (these are version control, project management, and methodology tools rather than data quality skills).
+* Statistical Analysis: NumPy (a Python library, not a statistical analysis technique).
+* Automation & Analytics: Python and Pandas are categorized under Automation & Analytics instead of Programming Languages and Libraries.
+
+Note: This issue occurs in both Standard and Deep resume optimization modes.
+
+2. Bug Title: Resume Tailoring – Resume Is Not Optimized After Regeneration
+
+Description: During the resume tailoring process, the resume is not optimized or tailored to match the selected job description.
+
+Even after clicking the "Regenerate" option, the system did not generate the resume.
+
+Note: This issue occurs during the Resume Tailoring/Resume Optimization process.
+
+
+base resume setup
+================
+in one cilnt name tarunkumar reddy and he setup base resume and I checked uploaded refence resume and after base resume setup technical skill section completely not added I will update the skill section 

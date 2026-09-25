@@ -1,0 +1,11 @@
+app bugs:
+
+When a notification appears, if I go back without opening the notification, it is still marked as read/opened. For example, if I receive a notification saying “You have been interviewed,” and I go to the Notifications section but do not actually open the notification, then go back and return to Notifications later, it shows the notification as already read/opened.
+
+In the mobile app, the Quick Filters do not allow users to select multiple options at the same time. For example, if I want to select both Sponsorship and Remote, I can only select one option. The app should allow users to select multiple Quick Filters simultaneously so they can combine filters and get more relevant results.
+
+In the UI, Held Back filter is appearing on the side.
+
+
+
+

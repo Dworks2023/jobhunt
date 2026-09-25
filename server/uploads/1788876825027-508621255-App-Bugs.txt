@@ -1,0 +1,8 @@
+
+The experience setting is not being saved under Manage Settings, so Job Scout is showing all jobs, including jobs with a 0% match.
+
+When a new notification arrives, the notification pop-up is not displayed.If I open the Notifications section and then go back without viewing a notification, when I open Notifications again, it is already marked as Read.
+
+In the V3, V6, and V9 templates, the email address in the cover letter is not working as a clickable link. It appears as plain text instead of a hyperlink.
+
+In Job Scout, instead of showing Why Job Scout Matches This and the location, it is directly showing the job description.

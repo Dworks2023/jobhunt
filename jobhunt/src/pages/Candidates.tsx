@@ -1653,50 +1653,28 @@ assignedSpecialist:
       {/* ============================================= */}
       {/* ADD CANDIDATE MODAL */}
       {/* ============================================= */}
-
-      {showAddModal && (
-
-        <CandidateFormModal
-          title="Add New Candidate"
-
-          description="Enter candidate and program details."
-
-          formData={formData}
-
-          setFormData={setFormData}
-
-          onClose={() => {
-
-            setFormData(
-              createEmptyForm(),
-            );
-
-            setShowAddModal(
-              false,
-            );
-
-          }}
-
-          onSubmit={
-            handleAddCandidate
-          }
-
-          submitLabel={
-            savingCandidate
-              ? "Adding..."
-              : "Add Candidate"
-          }
-
-          submitIcon={
-            <UserPlus className="size-4" />
-          }
-
-          saving={
-            savingCandidate
-          }
-        />
-
-      )}
+{showAddModal && (
+  <CandidateFormModal
+    title="Add New Candidate"
+    description="Enter candidate and program details."
+    formData={formData}
+    setFormData={setFormData}
+    onClose={() => {
+      setFormData(createEmptyForm());
+      setShowAddModal(false);
+    }}
+    onSubmit={handleAddCandidate}
+    submitLabel={
+      savingCandidate
+        ? "Adding..."
+        : "Add Candidate"
+    }
+    submitIcon={
+      <UserPlus className="size-4" />
+    }
+    saving={savingCandidate}
+  />
+)}
 
 
       {/* ============================================= */}
@@ -1906,6 +1884,8 @@ assignedSpecialist:
 /* REUSABLE CANDIDATE FORM MODAL */
 /* ============================================= */
 
+
+
 function CandidateFormModal({
   title,
   description,
@@ -1918,536 +1898,334 @@ function CandidateFormModal({
   saving,
 }: {
   title: string;
-
   description: string;
-
   formData: CandidateForm;
-
   setFormData: React.Dispatch<
-    React.SetStateAction<
-      CandidateForm
-    >
+    React.SetStateAction<CandidateForm>
   >;
-
   onClose: () => void;
-
   onSubmit: (
-    event:
-      React.FormEvent<
-        HTMLFormElement
-      >,
+    event: React.FormEvent<HTMLFormElement>
   ) => void;
-
   submitLabel: string;
-
-  submitIcon:
-    React.ReactNode;
-
+  submitIcon: React.ReactNode;
   saving: boolean;
 }) {
-
   const inputClass =
     "flex h-10 w-full rounded-lg border border-input bg-background px-3 text-sm outline-none transition focus:ring-2 focus:ring-ring/30";
 
   const selectClass =
     "flex h-10 w-full rounded-lg border border-input bg-background px-3 text-sm outline-none transition focus:ring-2 focus:ring-ring/30";
 
-
   return (
-
     <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/50 p-4 backdrop-blur-sm">
-
       <div className="max-h-[92vh] w-full max-w-4xl overflow-y-auto rounded-2xl border bg-background shadow-2xl">
 
-
         {/* HEADER */}
-
         <div className="sticky top-0 z-10 flex items-start justify-between border-b bg-background px-7 py-5">
-
           <div>
-
             <h2 className="text-xl font-semibold">
-
               {title}
-
             </h2>
 
             <p className="mt-1 text-sm text-muted-foreground">
-
               {description}
-
             </p>
-
           </div>
 
-
           <Button
+            type="button"
             variant="ghost"
             size="icon"
-
             onClick={onClose}
-
             disabled={saving}
           >
-
             <X className="size-5" />
-
           </Button>
-
         </div>
 
-
         {/* FORM */}
-
         <form
           onSubmit={onSubmit}
           className="p-7"
         >
 
           {/* PERSONAL DETAILS */}
-
           <div>
-
             <h3 className="font-semibold">
-
               Candidate Details
-
             </h3>
 
             <div className="mt-4 grid gap-5 md:grid-cols-2">
-
-
               <FormField
                 label="Full Name"
                 required
               >
-
                 <input
                   value={formData.name}
-
                   onChange={(event) =>
-                    setFormData(
-                      (current) => ({
-                        ...current,
-                        name:
-                          event.target.value,
-                      }),
-                    )
+                    setFormData((current) => ({
+                      ...current,
+                      name: event.target.value,
+                    }))
                   }
-
                   placeholder="Enter full name"
-
                   className={inputClass}
                 />
-
               </FormField>
-
 
               <FormField
                 label="Email Address"
                 required
               >
-
                 <input
                   type="email"
-
                   value={formData.email}
-
                   onChange={(event) =>
-                    setFormData(
-                      (current) => ({
-                        ...current,
-                        email:
-                          event.target.value,
-                      }),
-                    )
+                    setFormData((current) => ({
+                      ...current,
+                      email: event.target.value,
+                    }))
                   }
-
                   placeholder="candidate@email.com"
-
                   className={inputClass}
                 />
-
               </FormField>
 
-
-              <FormField
-                label="Phone"
-              >
-
+              <FormField label="Phone">
                 <input
                   value={formData.phone}
-
                   onChange={(event) =>
-                    setFormData(
-                      (current) => ({
-                        ...current,
-                        phone:
-                          event.target.value,
-                      }),
-                    )
+                    setFormData((current) => ({
+                      ...current,
+                      phone: event.target.value,
+                    }))
                   }
-
                   placeholder="+1 000 000 0000"
-
                   className={inputClass}
                 />
-
               </FormField>
 
-
-              <FormField
-                label="Location"
-              >
-
+              <FormField label="Location">
                 <input
                   value={formData.location}
-
                   onChange={(event) =>
-                    setFormData(
-                      (current) => ({
-                        ...current,
-                        location:
-                          event.target.value,
-                      }),
-                    )
+                    setFormData((current) => ({
+                      ...current,
+                      location: event.target.value,
+                    }))
                   }
-
                   placeholder="City, State"
-
                   className={inputClass}
                 />
-
               </FormField>
-
             </div>
-
           </div>
-
 
           {/* CAREER DETAILS */}
-
           <div className="mt-7 border-t pt-6">
-
             <h3 className="font-semibold">
-
               Career Details
-
             </h3>
 
             <div className="mt-4 grid gap-5 md:grid-cols-2">
-
-
-              <FormField
-                label="Domain"
-              >
-
+              <FormField label="Domain">
                 <select
                   value={formData.domain}
-
                   onChange={(event) =>
-                    setFormData(
-                      (current) => ({
-                        ...current,
-                        domain:
-                          event.target.value,
-                      }),
-                    )
+                    setFormData((current) => ({
+                      ...current,
+                      domain: event.target.value,
+                    }))
                   }
-
                   className={selectClass}
                 >
-
-                  {domains.map(
-                    (item) => (
-
-                      <option
-                        key={item}
-                        value={item}
-                      >
-
-                        {item}
-
-                      </option>
-
-                    ),
-                  )}
-
+                  {domains.map((item) => (
+                    <option
+                      key={item}
+                      value={item}
+                    >
+                      {item}
+                    </option>
+                  ))}
                 </select>
-
               </FormField>
 
-
-              <FormField
-                label="Target Role"
-              >
-
+              <FormField label="Target Role">
                 <input
                   value={formData.targetRole}
-
                   onChange={(event) =>
-                    setFormData(
-                      (current) => ({
-                        ...current,
-                        targetRole:
-                          event.target.value,
-                      }),
-                    )
+                    setFormData((current) => ({
+                      ...current,
+                      targetRole: event.target.value,
+                    }))
                   }
-
                   placeholder="Example: Data Analyst"
-
                   className={inputClass}
                 />
-
               </FormField>
 
-
-              <FormField
-                label="Experience"
-              >
-
+              <FormField label="Experience">
                 <input
                   value={formData.experience}
-
                   onChange={(event) =>
-                    setFormData(
-                      (current) => ({
-                        ...current,
-                        experience:
-                          event.target.value,
-                      }),
-                    )
+                    setFormData((current) => ({
+                      ...current,
+                      experience: event.target.value,
+                    }))
                   }
-
                   placeholder="Example: 0-2 yrs"
-
                   className={inputClass}
                 />
-
               </FormField>
-
             </div>
-
           </div>
 
-
           {/* PROGRAM DETAILS */}
-
           <div className="mt-7 border-t pt-6">
-
             <h3 className="font-semibold">
-
               Program Details
-
             </h3>
 
             <div className="mt-4 grid gap-5 md:grid-cols-2">
-
-
-              <FormField
-                label="Plan"
-              >
-
+              <FormField label="Plan">
                 <select
                   value={formData.plan}
-
                   onChange={(event) =>
-                    setFormData(
-                      (current) => ({
-                        ...current,
-                        plan:
-                          event.target.value,
-                      }),
-                    )
+                    setFormData((current) => ({
+                      ...current,
+                      plan: event.target.value,
+                    }))
                   }
-
                   className={selectClass}
                 >
-
-                  {plans.map(
-                    (item) => (
-
-                      <option
-                        key={item.name}
-                        value={item.name}
-                      >
-
-                        {item.name}
-
-                      </option>
-
-                    ),
-                  )}
-
+                  {plans.map((item) => (
+                    <option
+                      key={item.name}
+                      value={item.name}
+                    >
+                      {item.name}
+                    </option>
+                  ))}
                 </select>
-
               </FormField>
 
-
-              <FormField
-                label="Status"
-              >
-
+              <FormField label="Status">
                 <select
                   value={formData.status}
-
                   onChange={(event) =>
-                    setFormData(
-                      (current) => ({
-                        ...current,
-                        status:
-                          event.target
-                            .value as Status,
-                      }),
-                    )
+                    setFormData((current) => ({
+                      ...current,
+                      status: event.target.value as Status,
+                    }))
                   }
-
                   className={selectClass}
                 >
-
-                  {statuses.map(
-                    (item) => (
-
-                      <option
-                        key={item}
-                        value={item}
-                      >
-
-                        {item}
-
-                      </option>
-
-                    ),
-                  )}
-
+                  {statuses.map((item) => (
+                    <option
+                      key={item}
+                      value={item}
+                    >
+                      {item}
+                    </option>
+                  ))}
                 </select>
-
               </FormField>
 
-
-              <FormField
-                label="Start Date"
-              >
-
+              <FormField label="Start Date">
                 <input
                   type="date"
-
                   value={formData.startDate}
-
                   onChange={(event) =>
-                    setFormData(
-                      (current) => ({
-                        ...current,
-                        startDate:
-                          event.target.value,
-                      }),
-                    )
+                    setFormData((current) => ({
+                      ...current,
+                      startDate: event.target.value,
+                    }))
                   }
-
                   className={inputClass}
                 />
-
               </FormField>
 
-
-              <FormField
-                label="Assigned Specialist"
-              >
-
+              <FormField label="Assigned Specialist">
                 <input
                   value={formData.assignedSpecialist}
-
                   onChange={(event) =>
-                    setFormData(
-                      (current) => ({
-                        ...current,
-                        assignedSpecialist:
-                          event.target.value,
-                      }),
-                    )
+                    setFormData((current) => ({
+                      ...current,
+                      assignedSpecialist: event.target.value,
+                    }))
                   }
-
                   placeholder="Enter specialist name"
-
                   className={inputClass}
                 />
-
               </FormField>
 
-
               <FormField
-  label="Program Days"
-  required
->
-  <input
-    type="number"
-    min="1"
-    step="1"
-    value={formData.programDays}
-    onChange={(event) =>
-      setFormData(
-        (current) => ({
-          ...current,
-          programDays:
-            event.target.value,
-        }),
-      )
-    }
-    placeholder="Example: 45"
-    className={inputClass}
-  />
-</FormField>
-
+                label="Program Days"
+                required
+              >
+                <input
+                  type="number"
+                  min="1"
+                  step="1"
+                  value={formData.programDays}
+                  onChange={(event) =>
+                    setFormData((current) => ({
+                      ...current,
+                      programDays: event.target.value,
+                    }))
+                  }
+                  placeholder="Example: 45"
+                  className={inputClass}
+                />
+              </FormField>
             </div>
-
           </div>
-
 
           {/* NOTES */}
-
           <div className="mt-7 border-t pt-6">
-
-            <FormField
-              label="Internal Notes"
-            >
-
+            <FormField label="Internal Notes">
               <textarea
                 value={formData.notes}
-
                 onChange={(event) =>
-                  setFormData(
-                    (current) => ({
-                      ...current,
-                      notes:
-                        event.target.value,
-                    }),
-                  )
+                  setFormData((current) => ({
+                    ...current,
+                    notes: event.target.value,
+                  }))
                 }
-
                 placeholder="Add optional notes about this candidate..."
-
                 className="min-h-[120px] w-full rounded-lg border border-input bg-background px-3 py-3 text-sm outline-none transition focus:ring-2 focus:ring-ring/30"
               />
-
             </FormField>
-
           </div>
 
+          {/* ACTION BUTTONS */}
+          <div className="mt-6 flex justify-end gap-3 border-t pt-6">
+            <Button
+              type="button"
+              variant="outline"
+              onClick={onClose}
+              disabled={saving}
+            >
+              Cancel
+            </Button>
 
-      
+            <Button
+              type="submit"
+              disabled={saving}
+            >
+              {submitIcon}
 
-          {/* ACTIONS */}
-
+              <span className="ml-2">
+                {saving ? "Saving..." : submitLabel}
+              </span>
+            </Button>
+          </div>
 
         </form>
-
       </div>
-
     </div>
-
   );
-
 }
 
 
