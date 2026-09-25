@@ -66,7 +66,7 @@ const tabs = [
   "applications",
   "daily-mar",
   "reports",
-  "activity",
+  
 ] as const;
 
 type Tab =
@@ -84,12 +84,7 @@ type ReportType =
   | "Report";
 
 
-type ActivityItem = {
-  id: string;
-  _id?: string;
-  text: string;
-  date: string;
-};
+
 
 
 type Candidate = {
@@ -2337,23 +2332,7 @@ const paginatedApplications = applicationHistory.slice(
           </Button>
 
 
-          <Button
-            variant={
-              activeTab ===
-              "activity"
-                ? "default"
-                : "outline"
-            }
-            size="sm"
-            onClick={() =>
-              setActiveTab(
-                "activity",
-              )
-            }
-          >
-            Activity
-          </Button>
-
+          
         </div>
 
 
