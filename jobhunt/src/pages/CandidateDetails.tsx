@@ -11,6 +11,14 @@ import {
   Target,
   Upload,
   X,
+  Send,
+  Video,
+  Trophy,
+  CheckCircle2,
+  BriefcaseBusiness,
+  UserRound,
+  CalendarDays,
+  Layers,
 } from "lucide-react";
 
 import {
@@ -111,6 +119,8 @@ type Candidate = {
 
   plan?: string;
 
+  programDays?: number;
+
   owner?: string;
 
   assignedSpecialist?: string;
@@ -150,6 +160,8 @@ type UploadedReport = {
 
   title: string;
 
+  uploadedBy?: string;
+
   company?: string;
 
   role?: string;
@@ -178,6 +190,7 @@ type UploadedMARReport = {
   fileUrl: string;
 
   fileType: string;
+  updatedBy?: string;
 };
 
 
@@ -321,6 +334,13 @@ function normalizeCandidate(
           0,
       ),
 
+
+      programDays:
+  Number(
+    candidate?.programDays ??
+      0,
+  ),
+
     daysRemaining:
       Number(
         candidate?.daysRemaining ??
@@ -378,6 +398,12 @@ function normalizeReport(
       "Report"
         ? "Report"
         : "Interview Call",
+
+
+    uploadedBy:
+      report?.uploadedBy ||
+      report?.updatedBy ||
+      "",    
 
     title:
       report?.title ||
@@ -446,6 +472,12 @@ function normalizeMARReport(
       new Date()
         .toISOString()
         .split("T")[0],
+
+
+    updatedBy:
+  report?.updatedBy ||
+  report?.uploadedBy ||
+  "",    
 
     fileName:
       report?.fileName ||
@@ -535,6 +567,9 @@ const [
     ApplicationHistoryRecord[]
   >([]);
 
+  const [applicationsPage, setApplicationsPage] = useState(1);
+const applicationsPerPage = 8;
+
 const [
   applicationCredits,
   setApplicationCredits,
@@ -599,6 +634,15 @@ const [
       UploadedReport[]
     >([]);
 
+   
+
+
+    const [reportsPage, setReportsPage] = useState(1);
+const reportsPerPage = 8;
+
+
+    const [uploadedBy, setUploadedBy] = useState("");
+
   const [
     uploadedMARReports,
     setUploadedMARReports,
@@ -607,8 +651,25 @@ const [
       UploadedMARReport[]
     >([]);
 
+    // MAR Pagination
+
+    const [marPage, setMarPage] = useState(1);
+const marPerPage = 8;
+
+// MAR Upload Modal States
+    const [isMARModalOpen, setIsMARModalOpen] = useState(false);
+
+const [marUpdatedBy, setMarUpdatedBy] = useState("");
+
+const [marSelectedFile, setMarSelectedFile] = useState<File | null>(null);
+
+const [isMARUploading, setIsMARUploading] = useState(false);
+
 
   /*
+
+
+
   |--------------------------------------------------------------------------
   | FILE INPUTS
   |--------------------------------------------------------------------------
@@ -1146,22 +1207,18 @@ async function saveDailyApplications() {
       true,
     );
 
-    const result =
-      await addDailyApplications(
-        candidateId,
-        {
-          applications,
-
-          date:
-            applicationDate,
-
-          updatedBy:
-            applicationUpdatedBy.trim() ||
-            candidate?.owner ||
-            candidate?.assignedSpecialist ||
-            "Unassigned",
-        },
-      );
+    const result = await addDailyApplications(
+  candidateId,
+  {
+    applications,
+    date: applicationDate,
+    updatedBy:
+      applicationUpdatedBy.trim() ||
+      candidate?.owner ||
+      candidate?.assignedSpecialist ||
+      "Unassigned",
+  }
+);
 
     setApplicationCredits({
       total:
@@ -1200,6 +1257,9 @@ async function saveDailyApplications() {
 
           creditsRemaining:
             result.creditsRemaining,
+
+          daysRemaining:
+             result.daysRemaining,
         };
 
       },
@@ -1355,6 +1415,11 @@ function openUploadFileSelector() {
     return;
   }
 
+    if (!uploadedBy.trim()) {
+    alert("Please enter Updated By name.");
+    return;
+  }
+
   if (!candidateId) {
     alert(
       "Candidate ID is missing.",
@@ -1450,6 +1515,11 @@ function openUploadFileSelector() {
       uploadType,
     );
 
+    formData.append(
+  "uploadedBy",
+  uploadedBy.trim(),
+);
+
     /*
     ========================================
     INTERVIEW DATA
@@ -1533,6 +1603,8 @@ function openUploadFileSelector() {
       ],
     );
 
+    setReportsPage(1);
+
     alert(
       `${selectedFile.name} uploaded successfully.`,
     );
@@ -1599,9 +1671,11 @@ function openUploadFileSelector() {
   |--------------------------------------------------------------------------
   */
 
-  function openMARFilePicker() {
-    marFileInputRef.current?.click();
-  }
+ function openMARFilePicker() {
+  setMarUpdatedBy("");
+  setMarSelectedFile(null);
+  setIsMARModalOpen(true);
+}
 
 
   /*
@@ -1610,147 +1684,102 @@ function openUploadFileSelector() {
   |--------------------------------------------------------------------------
   */
 
-  async function handleMARUpload(
-    event: React.ChangeEvent<
-      HTMLInputElement
-    >,
-  ) {
 
-    const file =
-      event.target.files?.[0];
-
-    if (!file) {
-      return;
-    }
-
-    if (
-      !file.name
-        .toLowerCase()
-        .endsWith(
-          ".txt",
-        )
-    ) {
-
-      alert(
-        "Please upload a .txt file for the Daily MAR Report.",
-      );
-
-      event.target.value =
-        "";
-
-      return;
-    }
-
-    if (!candidateId) {
-      return;
-    }
-
-    try {
-
-      const formData =
-        new FormData();
-
-      formData.append(
-        "file",
-        file,
-      );
-
-      formData.append(
-        "uploadType",
-        "mar",
-      );
-
-      const response =
-        await fetch(
-          `${API_BASE_URL}/api/candidates/${candidateId}/mar`,
-          {
-            method:
-              "POST",
-
-            body:
-              formData,
-          },
-        );
-
-      if (!response.ok) {
-
-        const text =
-          await response.text();
-
-        throw new Error(
-          text ||
-            `MAR upload failed (${response.status})`,
-        );
-      }
-
-      const data =
-        await response.json();
-
-      const newMARReport =
-        normalizeMARReport(
-          data,
-        );
-
-      newMARReport.fileUrl =
-        resolveFileUrl(
-          newMARReport.fileUrl,
-        );
-
-      setUploadedMARReports(
-        (previous) => [
-          ...previous,
-          newMARReport,
-        ],
-      );
-
-      const reader =
-        new FileReader();
-
-      reader.onload = () => {
-
-        const text =
-          typeof reader.result ===
-          "string"
-            ? reader.result
-            : "";
-
-        setMarContent(
-          text,
-        );
-
-        setPreviewMAR(
-          newMARReport,
-        );
-      };
-
-      reader.readAsText(
-        file,
-      );
-
-      alert(
-        `${file.name} uploaded successfully.`,
-      );
-
-    } catch (err) {
-
-      console.error(
-        "MAR upload error:",
-        err,
-      );
-
-      alert(
-        err instanceof Error
-          ? err.message
-          : "Unable to upload the MAR report.",
-      );
-
-    } finally {
-
-      event.target.value =
-        "";
-    }
+async function handleMARUpload() {
+  if (!candidateId) {
+    alert("Candidate ID is missing.");
+    return;
   }
 
+  if (!marUpdatedBy.trim()) {
+    alert("Please enter your name.");
+    return;
+  }
+
+  if (!marSelectedFile) {
+    alert("Please select a PDF file.");
+    return;
+  }
+
+  if (
+  !marSelectedFile.name
+    .toLowerCase()
+    .endsWith(".txt")
+) {
+  alert("Please upload a TXT file.");
+  return;
+}
+
+  const file = marSelectedFile;
+
+  setIsMARUploading(true);
+
+  try {
+    const formData = new FormData();
+
+    formData.append("file", file);
+    formData.append(
+      "updatedBy",
+      marUpdatedBy.trim()
+    );
+    formData.append("uploadType", "mar");
+
+    const response = await fetch(
+      `${API_BASE_URL}/api/candidates/${candidateId}/mar`,
+      {
+        method: "POST",
+        body: formData,
+      }
+    );
+
+    if (!response.ok) {
+      const errorText = await response.text();
+
+      throw new Error(
+        errorText ||
+          `MAR upload failed (${response.status})`
+      );
+    }
+
+    const data = await response.json();
+
+    const newMARReport = {
+  ...normalizeMARReport(data),
+  updatedBy:
+    data?.updatedBy ||
+    data?.report?.updatedBy ||
+    marUpdatedBy.trim(),
+};
+
+    newMARReport.fileUrl =
+      resolveFileUrl(newMARReport.fileUrl);
+
+    // Add the uploaded report to the table
+    setUploadedMARReports((previous) => [
+      newMARReport,
+      ...previous,
+    ]);
+
+    setMarPage(1);
+
+    // Close the modal and clear fields
+    setIsMARModalOpen(false);
+    setMarUpdatedBy("");
+    setMarSelectedFile(null);
+
+    alert(`${file.name} uploaded successfully.`);
+  } catch (err) {
+    console.error("MAR upload error:", err);
+
+    alert(
+      err instanceof Error
+        ? err.message
+        : "Unable to upload the MAR report."
+    );
+  } finally {
+    setIsMARUploading(false);
+  }
+}
 
   /*
   |--------------------------------------------------------------------------
@@ -2032,6 +2061,55 @@ function openUploadFileSelector() {
         0,
     );
 
+
+    /*
+|-----------------------------------------
+| UPLOADED INTERVIEW AND REPORT COUNTS
+|-----------------------------------------
+*/
+
+const interviewCallsCount =
+  uploadedReports.filter(
+    (item) => item.type === "Interview Call"
+  ).length;
+
+const reportsCount =
+  uploadedReports.filter(
+    (item) => item.type === "Report"
+  ).length;
+
+
+  // ADD PAGINATION CODE HERE
+const totalReportsPages = Math.ceil(
+  uploadedReports.length / reportsPerPage
+);
+
+const paginatedReports = uploadedReports.slice(
+  (reportsPage - 1) * reportsPerPage,
+  reportsPage * reportsPerPage
+);
+
+// ADD DAILY MAR PAGINATION HERE
+
+const totalMARPages = Math.ceil(
+  uploadedMARReports.length / marPerPage
+);
+
+const paginatedMARReports = uploadedMARReports.slice(
+  (marPage - 1) * marPerPage,
+  marPage * marPerPage
+);
+
+const totalApplicationsPages = Math.ceil(
+  applicationHistory.length / applicationsPerPage
+);
+
+const paginatedApplications = applicationHistory.slice(
+  (applicationsPage - 1) * applicationsPerPage,
+  applicationsPage * applicationsPerPage
+);
+
+
   const creditPercentage =
     creditsTotal > 0
       ? (
@@ -2243,12 +2321,12 @@ function openUploadFileSelector() {
         </div>
 
 
-        {/* ==================================================
+       {/* ==================================================
     OVERVIEW
 ================================================== */}
 
 {activeTab === "overview" && (
-  <div className="mt-5 space-y-5">
+  <div className="mt-5 space-y-6">
 
     {/* ================================================
         PROGRAM PERFORMANCE
@@ -2256,7 +2334,7 @@ function openUploadFileSelector() {
 
     <div>
 
-      <div className="mb-3">
+      <div className="mb-4">
         <h2 className="text-lg font-semibold">
           Program Performance
         </h2>
@@ -2266,20 +2344,31 @@ function openUploadFileSelector() {
         </p>
       </div>
 
-
-      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+      <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
 
         {/* APPLICATIONS */}
 
-        <Card>
+        <Card className="rounded-xl">
           <CardContent className="p-5">
 
-            <p className="text-sm text-muted-foreground">
-              Applications
+            <div className="flex items-start justify-between">
+
+              <p className="text-sm text-muted-foreground">
+                Applications
+              </p>
+
+              <div className="rounded-xl bg-blue-500/10 p-3 text-blue-500">
+                <Send className="size-5" />
+              </div>
+
+            </div>
+
+            <p className="mt-1 text-3xl font-semibold">
+              {totals.applications}
             </p>
 
-            <p className="mt-2 text-3xl font-semibold">
-              {totals.applications}
+            <p className="mt-3 text-xs text-muted-foreground">
+              Total submitted
             </p>
 
           </CardContent>
@@ -2288,15 +2377,27 @@ function openUploadFileSelector() {
 
         {/* INTERVIEWS */}
 
-        <Card>
+        <Card className="rounded-xl">
           <CardContent className="p-5">
 
-            <p className="text-sm text-muted-foreground">
-              Interviews
+            <div className="flex items-start justify-between">
+
+              <p className="text-sm text-muted-foreground">
+                Interviews
+              </p>
+
+              <div className="rounded-xl bg-emerald-500/10 p-3 text-emerald-500">
+                <Video className="size-5" />
+              </div>
+
+            </div>
+
+            <p className="mt-1 text-3xl font-semibold">
+              {interviewCallsCount}
             </p>
 
-            <p className="mt-2 text-3xl font-semibold">
-              {totals.interviews}
+            <p className="mt-3 text-xs text-muted-foreground">
+              Interview calls
             </p>
 
           </CardContent>
@@ -2305,32 +2406,60 @@ function openUploadFileSelector() {
 
         {/* OFFERS */}
 
-        <Card>
+        <Card className="rounded-xl">
           <CardContent className="p-5">
 
-            <p className="text-sm text-muted-foreground">
-              Offers
+            <div className="flex items-start justify-between">
+
+              <p className="text-sm text-muted-foreground">
+                Offers
+              </p>
+
+              <div className="rounded-xl bg-amber-500/10 p-3 text-amber-500">
+                <Trophy className="size-5" />
+              </div>
+
+            </div>
+
+            <p className="mt-1 text-3xl font-semibold">
+              {totals.offers}
             </p>
 
-            <p className="mt-2 text-3xl font-semibold">
-              {totals.offers}
+            <p className="mt-3 text-xs text-muted-foreground">
+              Offers received
             </p>
 
           </CardContent>
         </Card>
 
-        {/* REPORTS */}
-<Card>
-  <CardContent className="p-5">
-    <p className="text-sm text-muted-foreground">
-      Reports
-    </p>
 
-    <p className="mt-2 text-3xl font-semibold">
-      {uploadedReports.length}
-    </p>
-  </CardContent>
-</Card>
+        {/* REPORTS */}
+
+        <Card className="rounded-xl">
+          <CardContent className="p-5">
+
+            <div className="flex items-start justify-between">
+
+              <p className="text-sm text-muted-foreground">
+                Reports
+              </p>
+
+              <div className="rounded-xl bg-purple-500/10 p-3 text-purple-500">
+                <FileText className="size-5" />
+              </div>
+
+            </div>
+
+            <p className="mt-1 text-3xl font-semibold">
+              {reportsCount}
+            </p>
+
+            <p className="mt-3 text-xs text-muted-foreground">
+              Uploaded reports
+            </p>
+
+          </CardContent>
+        </Card>
 
       </div>
 
@@ -2338,213 +2467,199 @@ function openUploadFileSelector() {
 
 
     {/* ================================================
-        CANDIDATE DETAILS + PROGRAM SUMMARY
+        CANDIDATE INFORMATION + PROGRAM OVERVIEW
     ================================================= */}
 
-    <div className="grid gap-5 lg:grid-cols-3">
-
+    <div className="grid gap-5 xl:grid-cols-3">
 
       {/* ================================================
-          LEFT SIDE - CANDIDATE DETAILS
+          CANDIDATE INFORMATION
       ================================================= */}
 
-      <Card className="lg:col-span-2">
+      <Card className="overflow-hidden rounded-xl xl:col-span-2">
 
-        <CardHeader>
+        <CardHeader className="border-b px-6 py-5">
+
           <CardTitle>
-            Candidate Details
+            Candidate Information
           </CardTitle>
+
+          <p className="text-sm text-muted-foreground">
+            Contact and professional details
+          </p>
+
         </CardHeader>
 
 
-        <CardContent>
+        <CardContent className="p-5">
 
-          <div className="grid gap-x-10 gap-y-6 sm:grid-cols-2">
+          <div className="grid gap-3 sm:grid-cols-2">
 
+            {/* EMAIL */}
 
-            {/* ============================================
-                LEFT COLUMN
-            ============================================= */}
+            <div className="flex items-center gap-3 rounded-xl border p-4">
 
-            <div className="space-y-6">
-
-
-              {/* EMAIL */}
-
-              <div className="flex items-start gap-3">
-
-                <Mail className="mt-0.5 size-5 text-muted-foreground" />
-
-                <div>
-
-                  <p className="text-sm text-muted-foreground">
-                    Email
-                  </p>
-
-                  <p className="mt-1 text-sm font-medium">
-                    {c.email || "-"}
-                  </p>
-
-                </div>
-
+              <div className="shrink-0 rounded-lg bg-blue-500/10 p-3 text-blue-500">
+                <Mail className="size-4" />
               </div>
 
+              <div className="min-w-0">
+                <p className="text-xs font-medium uppercase text-muted-foreground">
+                  Email
+                </p>
 
-              {/* PHONE */}
-
-              <div className="flex items-start gap-3">
-
-                <Phone className="mt-0.5 size-5 text-muted-foreground" />
-
-                <div>
-
-                  <p className="text-sm text-muted-foreground">
-                    Phone
-                  </p>
-
-                  <p className="mt-1 text-sm font-medium">
-                    {c.phone || "-"}
-                  </p>
-
-                </div>
-
-              </div>
-
-
-              {/* LOCATION */}
-
-              <div className="flex items-start gap-3">
-
-                <MapPin className="mt-0.5 size-5 text-muted-foreground" />
-
-                <div>
-
-                  <p className="text-sm text-muted-foreground">
-                    Location
-                  </p>
-
-                  <p className="mt-1 text-sm font-medium">
-                    {c.location || "-"}
-                  </p>
-
-                </div>
-
-              </div>
-
-
-              {/* EXPERIENCE */}
-
-              <div className="flex items-start gap-3">
-
-                <Target className="mt-0.5 size-5 text-muted-foreground" />
-
-                <div>
-
-                  <p className="text-sm text-muted-foreground">
-                    Experience
-                  </p>
-
-                  <p className="mt-1 text-sm font-medium">
-                    {c.experience || "-"}
-                  </p>
-
-                </div>
-
+                <p className="mt-1 break-all text-sm font-medium">
+                  {c.email || "-"}
+                </p>
               </div>
 
             </div>
 
 
-            {/* ============================================
-                RIGHT COLUMN
-            ============================================= */}
+            {/* PHONE */}
 
-            <div className="space-y-6">
+            <div className="flex items-center gap-3 rounded-xl border p-4">
 
-
-              {/* DOMAIN */}
-
-              <div className="flex items-start gap-3">
-
-                <Target className="mt-0.5 size-5 text-muted-foreground" />
-
-                <div>
-
-                  <p className="text-sm text-muted-foreground">
-                    Domain
-                  </p>
-
-                  <p className="mt-1 text-sm font-medium">
-                    {c.domain || "-"}
-                  </p>
-
-                </div>
-
+              <div className="shrink-0 rounded-lg bg-emerald-500/10 p-3 text-emerald-500">
+                <Phone className="size-4" />
               </div>
 
+              <div className="min-w-0">
+                <p className="text-xs font-medium uppercase text-muted-foreground">
+                  Phone
+                </p>
 
-              {/* TARGET ROLE */}
-
-              <div className="flex items-start gap-3">
-
-                <Target className="mt-0.5 size-5 text-muted-foreground" />
-
-                <div>
-
-                  <p className="text-sm text-muted-foreground">
-                    Target Role
-                  </p>
-
-                  <p className="mt-1 text-sm font-medium">
-                    {c.targetRole || "-"}
-                  </p>
-
-                </div>
-
+                <p className="mt-1 text-sm font-medium">
+                  {c.phone || "-"}
+                </p>
               </div>
 
+            </div>
 
-              {/* ASSIGNED SPECIALIST */}
 
-              <div className="flex items-start gap-3">
+            {/* LOCATION */}
 
-                <Target className="mt-0.5 size-5 text-muted-foreground" />
+            <div className="flex items-center gap-3 rounded-xl border p-4">
 
-                <div>
-
-                  <p className="text-sm text-muted-foreground">
-                    Assigned Specialist
-                  </p>
-
-                  <p className="mt-1 text-sm font-medium">
-                    {c.owner ||
-                      c.assignedSpecialist ||
-                      "Unassigned"}
-                  </p>
-
-                </div>
-
+              <div className="shrink-0 rounded-lg bg-rose-500/10 p-3 text-rose-500">
+                <MapPin className="size-4" />
               </div>
 
+              <div className="min-w-0">
+                <p className="text-xs font-medium uppercase text-muted-foreground">
+                  Location
+                </p>
 
-              {/* CREDITS */}
+                <p className="mt-1 text-sm font-medium">
+                  {c.location || "-"}
+                </p>
+              </div>
 
-              <div className="flex items-start gap-3">
+            </div>
 
-                <Coins className="mt-0.5 size-5 text-muted-foreground" />
 
-                <div>
+            {/* EXPERIENCE */}
 
-                  <p className="text-sm text-muted-foreground">
-                    Applications Remaining
-                  </p>
+            <div className="flex items-center gap-3 rounded-xl border p-4">
 
-                  <p className="mt-1 text-sm font-medium">
-                    {creditsRemaining} / {creditsTotal}
-                  </p>
+              <div className="shrink-0 rounded-lg bg-amber-500/10 p-3 text-amber-500">
+                <BriefcaseBusiness className="size-4" />
+              </div>
 
-                </div>
+              <div className="min-w-0">
+                <p className="text-xs font-medium uppercase text-muted-foreground">
+                  Experience
+                </p>
 
+                <p className="mt-1 text-sm font-medium">
+                  {c.experience || "-"}
+                </p>
+              </div>
+
+            </div>
+
+
+            {/* DOMAIN */}
+
+            <div className="flex items-center gap-3 rounded-xl border p-4">
+
+              <div className="shrink-0 rounded-lg bg-purple-500/10 p-3 text-purple-500">
+                <Layers className="size-4" />
+              </div>
+
+              <div className="min-w-0">
+                <p className="text-xs font-medium uppercase text-muted-foreground">
+                  Domain
+                </p>
+
+                <p className="mt-1 text-sm font-medium">
+                  {c.domain || "-"}
+                </p>
+              </div>
+
+            </div>
+
+
+            {/* TARGET ROLE */}
+
+            <div className="flex items-center gap-3 rounded-xl border p-4">
+
+              <div className="shrink-0 rounded-lg bg-cyan-500/10 p-3 text-cyan-500">
+                <Target className="size-4" />
+              </div>
+
+              <div className="min-w-0">
+                <p className="text-xs font-medium uppercase text-muted-foreground">
+                  Target Role
+                </p>
+
+                <p className="mt-1 text-sm font-medium">
+                  {c.targetRole || "-"}
+                </p>
+              </div>
+
+            </div>
+
+
+            {/* ASSIGNED SPECIALIST */}
+
+            <div className="flex items-center gap-3 rounded-xl border p-4">
+
+              <div className="shrink-0 rounded-lg bg-fuchsia-500/10 p-3 text-fuchsia-500">
+                <UserRound className="size-4" />
+              </div>
+
+              <div className="min-w-0">
+                <p className="text-xs font-medium uppercase text-muted-foreground">
+                  Assigned Specialist
+                </p>
+
+                <p className="mt-1 text-sm font-medium">
+                  {c.owner ||
+                    c.assignedSpecialist ||
+                    "Unassigned"}
+                </p>
+              </div>
+
+            </div>
+
+
+            {/* APPLICATIONS REMAINING */}
+
+            <div className="flex items-center gap-3 rounded-xl border p-4">
+
+              <div className="shrink-0 rounded-lg bg-orange-500/10 p-3 text-orange-500">
+                <Coins className="size-4" />
+              </div>
+
+              <div className="min-w-0">
+                <p className="text-xs font-medium uppercase text-muted-foreground">
+                  Applications Remaining
+                </p>
+
+                <p className="mt-1 text-sm font-medium">
+                  {creditsRemaining} / {creditsTotal}
+                </p>
               </div>
 
             </div>
@@ -2557,100 +2672,142 @@ function openUploadFileSelector() {
 
 
       {/* ================================================
-          RIGHT SIDE - PROGRAM SUMMARY
+          PROGRAM OVERVIEW
       ================================================= */}
 
-      <Card className="h-fit">
+      <Card className="h-fit overflow-hidden rounded-xl">
 
-        <CardHeader>
-          <CardTitle>
-            Program Summary
-          </CardTitle>
+        <CardHeader className="border-b px-6 py-5">
+
+          <div className="flex items-center justify-between">
+
+            <div>
+              <CardTitle>
+                Program Overview
+              </CardTitle>
+
+              <p className="mt-1 text-sm text-muted-foreground">
+                Subscription and application status
+              </p>
+            </div>
+
+            <CheckCircle2 className="size-5 text-emerald-500" />
+
+          </div>
+
         </CardHeader>
 
 
-        <CardContent className="space-y-6">
+        <CardContent className="space-y-5 p-5">
 
+          {/* APPLICATION PROGRESS */}
 
-          {/* PLAN */}
+          <div className="rounded-xl border p-4">
 
-          <div>
-
-            <p className="text-sm text-muted-foreground">
-              Plan
+            <p className="text-xs font-medium uppercase text-muted-foreground">
+              Applications
             </p>
 
-            <p className="mt-1 text-base font-semibold">
+            <div className="mt-2 flex items-end justify-between gap-3">
 
-              {c.plan
-                ? `${c.plan} Applications`
-                : "-"}
+              <div>
+                <p className="text-2xl font-semibold">
+                  {creditsRemaining}
+                </p>
 
-            </p>
+                <p className="text-sm text-muted-foreground">
+                  remaining
+                </p>
+              </div>
 
-          </div>
+              <p className="text-sm text-muted-foreground">
+                {creditsRemaining} / {creditsTotal}
+              </p>
 
+            </div>
 
-          {/* START DATE */}
+            <div className="mt-4 h-2.5 overflow-hidden rounded-full bg-muted">
 
-          <div>
+              <div
+                className="h-full rounded-full bg-emerald-500 transition-all"
+                style={{
+                  width: `${creditPercentage}%`,
+                }}
+              />
 
-            <p className="text-sm text-muted-foreground">
-              Start Date
-            </p>
+            </div>
 
-            <p className="mt-1 text-base font-medium">
-              {c.startDate || "-"}
-            </p>
-
-          </div>
-
-
-          {/* END DATE */}
-
-          <div>
-
-            <p className="text-sm text-muted-foreground">
-              End Date
-            </p>
-
-            <p className="mt-1 text-base font-medium">
-              {c.endDate || "-"}
+            <p className="mt-2 text-xs text-muted-foreground">
+              {creditPercentage.toFixed(0)}% of plan remaining
             </p>
 
           </div>
 
 
-          {/* DAYS REMAINING */}
+          {/* START DATE + END DATE */}
 
-          <div>
+          <div className="grid grid-cols-2 gap-3">
 
-            <p className="text-sm text-muted-foreground">
-              Days Remaining
-            </p>
+            <div className="rounded-xl border p-3">
 
-            <p className="mt-1 text-base font-medium">
-              {c.daysRemaining ?? 0}
-            </p>
+              <div className="flex items-center gap-2 text-muted-foreground">
+
+                <CalendarDays className="size-4" />
+
+                <p className="text-xs">
+                  Start Date
+                </p>
+
+              </div>
+
+              <p className="mt-2 break-words text-sm font-medium">
+                {c.startDate || "-"}
+              </p>
+
+            </div>
+
+
+            <div className="rounded-xl border p-3">
+
+              <div className="flex items-center gap-2 text-muted-foreground">
+
+                <CalendarDays className="size-4" />
+
+                <p className="text-xs">
+                  End Date
+                </p>
+
+              </div>
+
+              <p className="mt-2 break-words text-sm font-medium">
+                {c.endDate || "-"}
+              </p>
+
+            </div>
 
           </div>
 
 
-          {/* PROGRAM STATUS */}
+          {/* DAYS REMAINING + STATUS */}
 
-          <div>
+          <div className="rounded-xl border p-4">
 
-            <p className="text-sm text-muted-foreground">
-              Program Status
-            </p>
+            <div className="flex items-center justify-between gap-3">
 
-            <div className="mt-2">
+              <div>
+
+                <p className="text-xs font-medium uppercase text-muted-foreground">
+                  Days Remaining
+                </p>
+
+                <p className="mt-2 text-xl font-semibold">
+                  {c.daysRemaining ?? 0}
+                </p>
+
+              </div>
 
               <StatusBadge
-                status={
-                  c.status ||
-                  "Active"
-                }
+                status={c.status || "Active"}
               />
 
             </div>
@@ -2662,13 +2819,13 @@ function openUploadFileSelector() {
 
           {c.notes && (
 
-            <div className="border-t pt-5">
+            <div className="border-t pt-4">
 
-              <p className="text-sm text-muted-foreground">
+              <p className="text-xs font-medium uppercase text-muted-foreground">
                 Notes
               </p>
 
-              <p className="mt-2 text-sm">
+              <p className="mt-3 whitespace-pre-wrap text-sm leading-relaxed">
                 {c.notes}
               </p>
 
@@ -2890,163 +3047,139 @@ function openUploadFileSelector() {
       </CardHeader>
 
 
-      <CardContent className="px-0">
+    
+<CardContent className="px-0">
+  {applicationHistory.length > 0 ? (
+    <>
+      <div className="overflow-x-auto">
+        <table className="w-full min-w-[650px] text-sm">
+          <thead>
+            <tr className="border-y bg-muted/50 text-left text-xs uppercase tracking-wide text-muted-foreground">
+              <th className="px-6 py-3 font-medium">
+                Date
+              </th>
 
+              <th className="px-6 py-3 font-medium">
+                Applications
+              </th>
 
-        {
-          applicationHistory.length >
-          0 ? (
+              <th className="px-6 py-3 font-medium">
+                Applied By
+              </th>
+            </tr>
+          </thead>
 
-            <div className="overflow-x-auto">
-
-              <table className="w-full min-w-[650px] text-sm">
-
-                <thead>
-
-                  <tr className="border-y bg-muted/50 text-left text-xs uppercase tracking-wide text-muted-foreground">
-
-                    <th className="px-6 py-3 font-medium">
-                      Date
-                    </th>
-
-                    <th className="px-6 py-3 font-medium">
-                      Applications
-                    </th>
-
-                    <th className="px-6 py-3 font-medium">
-                      Applied By
-                    </th>
-
-                  </tr>
-
-                </thead>
-
-
-                <tbody>
-
-                  {
-                    applicationHistory.map(
-                      (
-                        item,
-                      ) => (
-
-                        <tr
-                          key={
-                            item.id ||
-                            item._id ||
-                            `${item.date}-${item.applications}`
-                          }
-                          className="border-b border-border/70 last:border-0"
-                        >
-
-                          <td className="px-6 py-4">
-
-                            {
-                              item.date
-                            }
-
-                          </td>
-
-
-                          <td className="px-6 py-4">
-
-                            <span className="font-semibold">
-
-                              {
-                                item.applications
-                              }
-
-                            </span>
-
-                          </td>
-
-
-                          <td className="px-6 py-4 text-muted-foreground">
-
-                            {
-                              item.updatedBy ||
-                              "Unassigned"
-                            }
-
-                          </td>
-
-
-                        </tr>
-
-                      ),
-                    )
-                  }
-
-                </tbody>
-
-              </table>
-
-            </div>
-
-          ) : (
-
-            <div className="py-12 text-center">
-
-
-              <Coins className="mx-auto size-10 text-muted-foreground" />
-
-
-              <p className="mt-4 text-sm font-semibold">
-
-                No applications recorded yet
-
-              </p>
-
-
-              <p className="mt-1 text-sm text-muted-foreground">
-
-                Start recording daily job applications for this candidate.
-
-              </p>
-
-
-              <Button
-                className="mt-5"
-                variant="outline"
-                onClick={() => {
-
-                  setApplicationError("");
-
-                  setApplicationCount("");
-
-                  setApplicationDate(
-                    new Date()
-                      .toISOString()
-                      .split("T")[0],
-                  );
-
-                  setApplicationUpdatedBy(
-                    candidate?.owner ||
-                    candidate?.assignedSpecialist ||
-                    "",
-                  );
-
-                  setApplicationModalOpen(
-                    true,
-                  );
-
-                }}
+          <tbody>
+            {paginatedApplications.map((item) => (
+              <tr
+                key={
+                  item.id ||
+                  item._id ||
+                  `${item.date}-${item.applications}`
+                }
+                className="border-b border-border/70 last:border-0"
               >
+                <td className="px-6 py-4">
+                  {item.date}
+                </td>
 
-                <Plus className="size-4" />
+                <td className="px-6 py-4">
+                  <span className="font-semibold">
+                    {item.applications}
+                  </span>
+                </td>
 
-                Add Applications
+                <td className="px-6 py-4 text-muted-foreground">
+                  {item.updatedBy || "Unassigned"}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
 
-              </Button>
+      {/* APPLICATIONS PAGINATION */}
+      {applicationHistory.length > applicationsPerPage && (
+        <div className="flex items-center justify-between mt-4 px-6">
+          <p className="text-sm text-muted-foreground">
+            Page {applicationsPage} of {totalApplicationsPages}
+            {" · "}
+            {applicationHistory.length} application records
+          </p>
 
+          <div className="flex gap-2">
+            <Button
+              variant="outline"
+              size="sm"
+              disabled={applicationsPage === 1}
+              onClick={() =>
+                setApplicationsPage((prev) =>
+                  Math.max(1, prev - 1)
+                )
+              }
+            >
+              Previous
+            </Button>
 
-            </div>
+            <Button
+              variant="outline"
+              size="sm"
+              disabled={
+                applicationsPage >= totalApplicationsPages
+              }
+              onClick={() =>
+                setApplicationsPage((prev) =>
+                  Math.min(
+                    totalApplicationsPages,
+                    prev + 1
+                  )
+                )
+              }
+            >
+              Next
+            </Button>
+          </div>
+        </div>
+      )}
+    </>
+  ) : (
+    <div className="py-12 text-center">
+      <Coins className="mx-auto size-10 text-muted-foreground" />
 
-          )
-        }
+      <p className="mt-4 text-sm font-semibold">
+        No applications recorded yet
+      </p>
 
+      <p className="mt-1 text-sm text-muted-foreground">
+        Start recording daily job applications for this candidate.
+      </p>
 
-      </CardContent>
+      <Button
+        className="mt-5"
+        variant="outline"
+        onClick={() => {
+          setApplicationError("");
+          setApplicationCount("");
+
+          setApplicationDate(
+            new Date().toISOString().split("T")[0]
+          );
+
+          setApplicationUpdatedBy(
+            candidate?.owner ||
+            candidate?.assignedSpecialist ||
+            ""
+          );
+
+          setApplicationModalOpen(true);
+        }}
+      >
+        <Plus className="size-4" />
+        Add Applications
+      </Button>
+    </div>
+  )}
+</CardContent>
 
     </Card>
 
@@ -3060,334 +3193,420 @@ function openUploadFileSelector() {
             DAILY MAR
         ================================================== */}
 
-        {activeTab ===
-          "daily-mar" && (
+       
+   
 
-          <Card className="mt-5">
+{activeTab === "daily-mar" && (
+  <Card className="mt-5">
+    <CardHeader className="flex-row items-center justify-between">
+      <div>
+        <CardTitle>Daily MAR Report</CardTitle>
+        <p className="mt-1 text-sm text-muted-foreground">
+          Upload today's MAR report and enter the uploader's name.
+        </p>
+      </div>
 
-            <CardHeader className="flex-row items-center justify-between">
+      <Button
+        size="sm"
+        variant="outline"
+        onClick={() => {
+          setMarUpdatedBy("");
+          setMarSelectedFile(null);
+          setIsMARModalOpen(true);
+        }}
+      >
+        <Upload className="size-4" />
+        Upload MAR Report
+      </Button>
+    </CardHeader>
 
-              <div>
+    <CardContent className="px-0">
+  {uploadedMARReports.length > 0 ? (
+    <>
+      <div className="overflow-x-auto">
+        <table className="w-full min-w-[750px] text-sm">
+          <thead>
+            <tr className="border-y bg-muted/50 text-left text-xs uppercase tracking-wide text-muted-foreground">
+              <th className="px-6 py-3 font-medium">Date</th>
+              <th className="px-6 py-3 font-medium">Updated By</th>
+              <th className="px-6 py-3 font-medium">Report</th>
+              <th className="px-6 py-3 text-center font-medium">
+                Action
+              </th>
+            </tr>
+          </thead>
 
-                <CardTitle>
-                  Daily MAR Report
-                </CardTitle>
-
-                <p className="mt-1 text-sm text-muted-foreground">
-                  Upload today's .txt or PDF MAR report from your PC or drive.
-                </p>
-
-              </div>
-
-
-              <Button
-                size="sm"
-                variant="outline"
-                onClick={
-                  openMARFilePicker
-                }
+          <tbody>
+            {paginatedMARReports.map((report) => (
+              <tr
+                key={report.id}
+                className="border-b border-border/70 last:border-0"
               >
-                <Upload className="size-4" />
-                Upload MAR Report
-              </Button>
+                <td className="whitespace-nowrap px-6 py-3 text-muted-foreground">
+                  {report.date || "-"}
+                </td>
 
-            </CardHeader>
+                <td className="whitespace-nowrap px-6 py-3">
+                  <span className="font-medium">
+                    {report.updatedBy || "-"}
+                  </span>
+                </td>
 
+                <td className="px-6 py-3">
+                  <div className="flex items-center gap-3">
+                    <FileText className="size-4 shrink-0 text-muted-foreground" />
 
-            <CardContent className="px-0">
+                    <div className="min-w-0">
+                      <p className="truncate font-medium">
+                        {report.fileName}
+                      </p>
 
-              {uploadedMARReports.length >
-              0 ? (
+                      <p className="text-xs text-muted-foreground">
+                        Daily MAR Report • PDF
+                      </p>
+                    </div>
+                  </div>
+                </td>
 
-                <div className="overflow-x-auto">
-
-                  <table className="w-full min-w-[600px] text-sm">
-
-                    <thead>
-
-                      <tr className="border-y bg-muted/50 text-left text-xs uppercase tracking-wide text-muted-foreground">
-
-                        <th className="px-6 py-3 font-medium">
-                          Date
-                        </th>
-
-                        <th className="px-6 py-3 font-medium">
-                          Report
-                        </th>
-
-                        <th className="px-6 py-3 text-center font-medium">
-                          Action
-                        </th>
-
-                      </tr>
-
-                    </thead>
-
-
-                    <tbody>
-
-                      {uploadedMARReports.map(
-                        (
-                          report,
-                        ) => (
-
-                          <tr
-                            key={
-                              report.id
-                            }
-                            className="border-b border-border/70 last:border-0"
-                          >
-
-                            <td className="px-6 py-3 text-muted-foreground">
-                              {
-                                report.date
-                              }
-                            </td>
-
-
-                            <td className="px-6 py-3">
-
-                              <div className="flex items-center gap-3">
-
-                                <FileText className="size-4 text-muted-foreground" />
-
-                                <div className="min-w-0">
-
-                                  <p className="truncate font-medium">
-                                    {
-                                      report.fileName
-                                    }
-                                  </p>
-
-                                  <p className="text-xs text-muted-foreground">
-  Daily MAR Report •{" "}
-  {report.fileFormat ||
-    (report.fileName
-      ?.toLowerCase()
-      .endsWith(".pdf")
-      ? "PDF"
-      : "TXT")}
-</p>
-
-                                </div>
-
-                              </div>
-
-                            </td>
-
-
-                            <td className="px-6 py-3 text-center">
-
-                              <button
-                                type="button"
-                                className="inline-flex size-8 items-center justify-center rounded-md hover:bg-muted"
-                                onClick={() =>
-                                  openMARReport(
-                                    report,
-                                  )
-                                }
-                                title="View MAR report"
-                              >
-                                <Eye className="size-4" />
-                              </button>
-
-                            </td>
-
-                          </tr>
-                        ),
-                      )}
-
-                    </tbody>
-
-                  </table>
-
-                </div>
-
-              ) : (
-
-                <div className="border-t px-6 py-10 text-center">
-
-                  <FileText className="mx-auto size-10 text-muted-foreground" />
-
-                  <p className="mt-3 text-sm font-medium">
-                    No Daily MAR reports uploaded
-                  </p>
-
-                  <p className="mt-1 text-xs text-muted-foreground">
-                    Upload today's .txt MAR report from your PC or drive.
-                  </p>
-
-                  <Button
-                    className="mt-4"
-                    variant="outline"
-                    onClick={
-                      openMARFilePicker
-                    }
+                <td className="px-6 py-3 text-center">
+                  <button
+                    type="button"
+                    className="inline-flex size-8 items-center justify-center rounded-md hover:bg-muted"
+                    onClick={() => openMARReport(report)}
+                    title="View MAR report"
                   >
-                    <Upload className="size-4" />
-                    Upload .txt Report
-                  </Button>
+                    <Eye className="size-4" />
+                  </button>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
 
-                </div>
+      {/* DAILY MAR PAGINATION START */}
+      {uploadedMARReports.length > marPerPage && (
+        <div className="mt-4 flex items-center justify-between px-6">
+          <p className="text-sm text-muted-foreground">
+            Page {marPage} of {totalMARPages}
+            {" · "}
+            {uploadedMARReports.length} MAR reports
+          </p>
 
+          <div className="flex gap-2">
+            <Button
+              variant="outline"
+              size="sm"
+              disabled={marPage === 1}
+              onClick={() =>
+                setMarPage((prev) => Math.max(1, prev - 1))
+              }
+            >
+              Previous
+            </Button>
+
+            <Button
+              variant="outline"
+              size="sm"
+              disabled={marPage >= totalMARPages}
+              onClick={() =>
+                setMarPage((prev) =>
+                  Math.min(totalMARPages, prev + 1)
+                )
+              }
+            >
+              Next
+            </Button>
+          </div>
+        </div>
+      )}
+      {/* DAILY MAR PAGINATION END */}
+    </>
+  ) : (
+    <div className="border-t px-6 py-10 text-center">
+      <FileText className="mx-auto size-10 text-muted-foreground" />
+
+      <p className="mt-3 text-sm font-medium">
+        No Daily MAR reports uploaded
+      </p>
+
+      <p className="mt-1 text-xs text-muted-foreground">
+        Upload today's PDF report.
+      </p>
+
+      <Button
+        className="mt-4"
+        variant="outline"
+        onClick={() => {
+          setMarUpdatedBy("");
+          setMarSelectedFile(null);
+          setIsMARModalOpen(true);
+        }}
+      >
+        <Upload className="size-4" />
+        Upload MAR Report
+      </Button>
+    </div>
+  )}
+</CardContent>
+
+    {/* UPLOAD MAR MODAL */}
+    {isMARModalOpen && (
+      <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+        <div className="w-full max-w-md rounded-xl border bg-background p-6 shadow-xl">
+          <div className="mb-5 flex items-center justify-between">
+            <div>
+              <h2 className="text-lg font-semibold">
+                Upload Daily MAR
+              </h2>
+              <p className="mt-1 text-sm text-muted-foreground">
+                Enter your name and select the MAR PDF.
+              </p>
+            </div>
+
+            <button
+              type="button"
+              className="rounded-md p-2 hover:bg-muted"
+              onClick={() => setIsMARModalOpen(false)}
+              disabled={isMARUploading}
+              title="Close"
+            >
+              <span className="text-xl">&times;</span>
+            </button>
+          </div>
+
+          <div className="space-y-4">
+            {/* NAME FIELD */}
+            <div className="space-y-2">
+              <label className="text-sm font-medium">
+                Updated By (Name) *
+              </label>
+
+              <input
+                type="text"
+                value={marUpdatedBy}
+                onChange={(e) => setMarUpdatedBy(e.target.value)}
+                placeholder="Enter your name"
+                className="w-full rounded-md border bg-background px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-primary"
+                required
+              />
+            </div>
+
+            {/* PDF FILE FIELD */}
+            <div className="space-y-2">
+              <label className="text-sm font-medium">
+  Upload Daily MAR Text File *
+</label>
+
+              <input
+  type="file"
+  accept=".txt,text/plain"
+  onChange={(e) => {
+    const file = e.target.files?.[0];
+
+    if (
+      file &&
+      !file.name.toLowerCase().endsWith(".txt")
+    ) {
+      alert("Please select a TXT file.");
+      e.target.value = "";
+      setMarSelectedFile(null);
+      return;
+    }
+
+    setMarSelectedFile(file || null);
+  }}
+  className="w-full rounded-md border bg-background px-3 py-2 text-sm"
+  required
+/>
+
+              {marSelectedFile && (
+                <p className="text-xs text-muted-foreground">
+                  Selected: {marSelectedFile.name}
+                </p>
               )}
+            </div>
+          </div>
 
-            </CardContent>
+          {/* MODAL ACTIONS */}
+          <div className="mt-6 flex justify-end gap-3">
+            <Button
+              type="button"
+              variant="outline"
+              disabled={isMARUploading}
+              onClick={() => setIsMARModalOpen(false)}
+            >
+              Cancel
+            </Button>
 
-          </Card>
-        )}
+            <Button
+              type="button"
+              disabled={
+                isMARUploading ||
+                !marUpdatedBy.trim() ||
+                !marSelectedFile
+              }
+             onClick={handleMARUpload}
+            >
+              {isMARUploading ? "Uploading..." : "Submit"}
+            </Button>
+          </div>
+        </div>
+      </div>
+    )}
+  </Card>
+)}
 
 
         {/* ==================================================
             REPORTS
         ================================================== */}
 
-        {activeTab ===
-          "reports" && (
+       
+{activeTab === "reports" && (
+  <Card className="mt-5">
+    <CardHeader className="flex-row items-center justify-between">
+      <CardTitle>Reports & Interview Calls</CardTitle>
 
-          <Card className="mt-5">
+      <Button
+        size="sm"
+        variant="outline"
+        onClick={openFilePicker}
+      >
+        <Upload className="size-4" />
+        Upload File
+      </Button>
+    </CardHeader>
 
-            <CardHeader className="flex-row items-center justify-between">
+    <CardContent className="px-0">
+      <div className="overflow-x-auto">
+        <table className="w-full min-w-[900px] text-sm">
+          <thead>
+            <tr className="border-y bg-muted/50 text-left text-xs uppercase tracking-wide text-muted-foreground">
+              <th className="px-6 py-3 font-medium">
+                Date
+              </th>
 
-              <CardTitle>
-                Reports & Interview Calls
-              </CardTitle>
+              <th className="px-6 py-3 font-medium">
+                Type
+              </th>
 
+              <th className="px-6 py-3 font-medium">
+                Detail
+              </th>
 
-              <Button
-                size="sm"
-                variant="outline"
-                onClick={
-                  openFilePicker
-                }
+              <th className="px-6 py-3 font-medium">
+                Uploaded By
+              </th>
+
+              <th className="px-6 py-3 text-center font-medium">
+                Action
+              </th>
+            </tr>
+          </thead>
+
+          <tbody>
+           {paginatedReports.map((report) => (
+              <tr
+                key={report.id}
+                className="border-b border-border/70 last:border-0"
               >
-                <Upload className="size-4" />
-                Upload File
-              </Button>
+                <td className="px-6 py-3 text-muted-foreground">
+                  {report.date}
+                </td>
 
-            </CardHeader>
+                <td className="px-6 py-3">
+                  <span className="rounded-full border bg-muted/60 px-2.5 py-0.5 text-xs">
+                    {report.type}
+                  </span>
+                </td>
 
+                <td className="px-6 py-3">
+                  {getReportDetail(report)}
+                </td>
 
-            <CardContent className="px-0">
+                <td className="px-6 py-3">
+                  <span className="font-medium">
+                   {report.uploadedBy ||
+    report.updatedBy ||
+    "—"}
+                  </span>
+                </td>
 
-              <div className="overflow-x-auto">
-
-                <table className="w-full min-w-[760px] text-sm">
-
-                  <thead>
-
-                    <tr className="border-y bg-muted/50 text-left text-xs uppercase tracking-wide text-muted-foreground">
-
-                      <th className="px-6 py-3 font-medium">
-                        Date
-                      </th>
-
-                      <th className="px-6 py-3 font-medium">
-                        Type
-                      </th>
-
-                      <th className="px-6 py-3 font-medium">
-                        Detail
-                      </th>
-
-                      <th className="px-6 py-3 text-center font-medium">
-                        Action
-                      </th>
-
-                    </tr>
-
-                  </thead>
-
-
-                  <tbody>
-
-                    {uploadedReports.map(
-                      (
-                        report,
-                      ) => (
-
-                        <tr
-                          key={
-                            report.id
-                          }
-                          className="border-b border-border/70 last:border-0"
-                        >
-
-                          <td className="px-6 py-3 text-muted-foreground">
-                            {
-                              report.date
-                            }
-                          </td>
+                <td className="px-6 py-3 text-center">
+                  <button
+                    type="button"
+                    className="inline-flex size-8 items-center justify-center rounded-md hover:bg-muted"
+                    onClick={() => openUploadedReport(report)}
+                    title="View file"
+                  >
+                    <Eye className="size-4" />
+                  </button>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
 
 
-                          <td className="px-6 py-3">
 
-                            <span className="rounded-full border bg-muted/60 px-2.5 py-0.5 text-xs">
-                              {
-                                report.type
-                              }
-                            </span>
+      {/* PAGINATION START */}
+      {uploadedReports.length > 8 && (
+        <div className="flex items-center justify-between mt-4 px-6">
+          <p className="text-sm text-muted-foreground">
+            Page {reportsPage} of {totalReportsPages}
+            {" · "}
+            {uploadedReports.length} reports
+          </p>
 
-                          </td>
+          <div className="flex gap-2">
+            <Button
+              variant="outline"
+              size="sm"
+              disabled={reportsPage === 1}
+              onClick={() =>
+                setReportsPage((prev) => Math.max(1, prev - 1))
+              }
+            >
+              Previous
+            </Button>
 
+            <Button
+              variant="outline"
+              size="sm"
+              disabled={reportsPage >= totalReportsPages}
+              onClick={() =>
+                setReportsPage((prev) =>
+                  Math.min(totalReportsPages, prev + 1)
+                )
+              }
+            >
+              Next
+            </Button>
+          </div>
+        </div>
+      )}
+      {/* PAGINATION END */}
 
-                          <td className="px-6 py-3">
-                            {getReportDetail(
-                              report,
-                            )}
-                          </td>
+     
 
+      {uploadedReports.length === 0 && (
+        <div className="border-t px-6 py-8 text-center">
+          <FileText className="mx-auto size-8 text-muted-foreground" />
 
-                          <td className="px-6 py-3 text-center">
+          <p className="mt-2 text-sm font-medium">
+            No uploaded files yet
+          </p>
 
-                            <button
-                              type="button"
-                              className="inline-flex size-8 items-center justify-center rounded-md hover:bg-muted"
-                              onClick={() =>
-                                openUploadedReport(
-                                  report,
-                                )
-                              }
-                              title="View file"
-                            >
-                              <Eye className="size-4" />
-                            </button>
-
-                          </td>
-
-                        </tr>
-                      ),
-                    )}
-
-                  </tbody>
-
-                </table>
-
-              </div>
-
-
-              {uploadedReports.length ===
-                0 && (
-
-                <div className="border-t px-6 py-8 text-center">
-
-                  <FileText className="mx-auto size-8 text-muted-foreground" />
-
-                  <p className="mt-2 text-sm font-medium">
-                    No uploaded files yet
-                  </p>
-
-                  <p className="mt-1 text-xs text-muted-foreground">
-                    Upload an interview call image or report to add it here.
-                  </p>
-
-                </div>
-              )}
-
-            </CardContent>
-
-          </Card>
-        )}
+          <p className="mt-1 text-xs text-muted-foreground">
+            Upload an interview call image or report to add it here.
+          </p>
+        </div>
+      )}
+    </CardContent>
+  </Card>
+)}
 
 
         {/* ==================================================
@@ -3503,14 +3722,12 @@ function openUploadFileSelector() {
           UPLOAD MODAL
       ================================================== */}
 
-      {uploadModalOpen && (
+{uploadModalOpen && (
   <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/50 p-4 backdrop-blur-sm">
 
     <div className="w-full max-w-lg rounded-2xl border bg-background shadow-2xl">
 
-      {/* ======================================== */}
       {/* HEADER */}
-      {/* ======================================== */}
 
       <div className="border-b px-6 py-5">
 
@@ -3524,16 +3741,11 @@ function openUploadFileSelector() {
 
       </div>
 
-
-      {/* ======================================== */}
       {/* CONTENT */}
-      {/* ======================================== */}
 
       <div className="space-y-5 p-6">
 
-        {/* ======================================== */}
         {/* SELECT TYPE */}
-        {/* ======================================== */}
 
         <div>
 
@@ -3548,21 +3760,13 @@ function openUploadFileSelector() {
               const value =
                 event.target.value as ReportType;
 
-              setUploadType(
-                value,
-              );
+              setUploadType(value);
 
-              setSelectedFile(
-                null,
-              );
+              setSelectedFile(null);
 
-              setCompanyName(
-                "",
-              );
+              setCompanyName("");
 
-              setRoleName(
-                "",
-              );
+              setRoleName("");
 
             }}
             className="mt-2 h-10 w-full rounded-md border bg-background px-3 text-sm outline-none focus:ring-2 focus:ring-ring"
@@ -3580,13 +3784,9 @@ function openUploadFileSelector() {
 
         </div>
 
-
-        {/* ======================================== */}
         {/* INTERVIEW FIELDS */}
-        {/* ======================================== */}
 
-        {uploadType ===
-          "Interview Call" && (
+        {uploadType === "Interview Call" && (
           <>
 
             <div>
@@ -3599,16 +3799,13 @@ function openUploadFileSelector() {
                 type="text"
                 value={companyName}
                 onChange={(event) =>
-                  setCompanyName(
-                    event.target.value,
-                  )
+                  setCompanyName(event.target.value)
                 }
                 placeholder="Enter company name"
                 className="mt-2 h-10 w-full rounded-md border bg-background px-3 text-sm outline-none focus:ring-2 focus:ring-ring"
               />
 
             </div>
-
 
             <div>
 
@@ -3620,16 +3817,13 @@ function openUploadFileSelector() {
                 type="text"
                 value={roleName}
                 onChange={(event) =>
-                  setRoleName(
-                    event.target.value,
-                  )
+                  setRoleName(event.target.value)
                 }
                 placeholder="Enter job role"
                 className="mt-2 h-10 w-full rounded-md border bg-background px-3 text-sm outline-none focus:ring-2 focus:ring-ring"
               />
 
             </div>
-
 
             <div>
 
@@ -3639,9 +3833,7 @@ function openUploadFileSelector() {
 
               <button
                 type="button"
-                onClick={
-                  openUploadFileSelector
-                }
+                onClick={openUploadFileSelector}
                 className="mt-2 flex min-h-[120px] w-full flex-col items-center justify-center rounded-xl border-2 border-dashed p-6 text-center transition hover:bg-muted/50"
               >
 
@@ -3662,13 +3854,9 @@ function openUploadFileSelector() {
           </>
         )}
 
-
-        {/* ======================================== */}
         {/* REPORT FIELDS */}
-        {/* ======================================== */}
 
-        {uploadType ===
-          "Report" && (
+        {uploadType === "Report" && (
           <>
 
             <div>
@@ -3680,9 +3868,7 @@ function openUploadFileSelector() {
               <select
                 value={reportType}
                 onChange={(event) =>
-                  setReportType(
-                    event.target.value,
-                  )
+                  setReportType(event.target.value)
                 }
                 className="mt-2 h-10 w-full rounded-md border bg-background px-3 text-sm outline-none focus:ring-2 focus:ring-ring"
               >
@@ -3703,7 +3889,6 @@ function openUploadFileSelector() {
 
             </div>
 
-
             <div>
 
               <label className="text-sm font-medium">
@@ -3712,9 +3897,7 @@ function openUploadFileSelector() {
 
               <button
                 type="button"
-                onClick={
-                  openUploadFileSelector
-                }
+                onClick={openUploadFileSelector}
                 className="mt-2 flex min-h-[120px] w-full flex-col items-center justify-center rounded-xl border-2 border-dashed p-6 text-center transition hover:bg-muted/50"
               >
 
@@ -3735,10 +3918,32 @@ function openUploadFileSelector() {
           </>
         )}
 
+        {/* UPDATED BY - COMMON FOR BOTH TYPES */}
 
-        {/* ======================================== */}
+        <div className="space-y-2">
+
+          <label
+            htmlFor="uploadedBy"
+            className="text-sm font-medium"
+          >
+            Updated By <span className="text-destructive">*</span>
+          </label>
+
+          <input
+            id="uploadedBy"
+            type="text"
+            value={uploadedBy}
+            onChange={(event) =>
+              setUploadedBy(event.target.value)
+            }
+            placeholder="Enter the name of the person updating"
+            className="h-10 w-full rounded-md border bg-background px-3 text-sm outline-none focus:ring-2 focus:ring-ring"
+            required
+          />
+
+        </div>
+
         {/* SELECTED FILE */}
-        {/* ======================================== */}
 
         {selectedFile && (
           <div className="rounded-xl border bg-muted/40 p-4">
@@ -3754,33 +3959,24 @@ function openUploadFileSelector() {
           </div>
         )}
 
-
-        {/* ======================================== */}
         {/* BUTTONS */}
-        {/* ======================================== */}
 
         <div className="flex justify-end gap-3 pt-2">
 
           <Button
             variant="outline"
-            onClick={
-              closeUploadModal
-            }
-            disabled={
-              uploading
-            }
+            onClick={closeUploadModal}
+            disabled={uploading}
           >
             Cancel
           </Button>
 
-
           <Button
-            onClick={
-              saveUploadedFile
-            }
+            onClick={saveUploadedFile}
             disabled={
               uploading ||
-              !selectedFile
+              !selectedFile ||
+              !uploadedBy.trim()
             }
           >
 
