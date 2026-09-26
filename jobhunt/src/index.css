@@ -1,0 +1,136 @@
+@import "tailwindcss";
+
+@theme {
+  /* =========================
+     MAIN THEME
+     ========================= */
+
+  --color-background: #121315;
+  --color-foreground: #ffffff;
+
+  /* =========================
+     CARDS
+     ========================= */
+
+  --color-card: #1a1c1e;
+  --color-card-foreground: #ffffff;
+
+  /* =========================
+     PRIMARY - GREEN
+     ========================= */
+
+  --color-primary: #5eb586;
+  --color-primary-foreground: #121315;
+
+  /* =========================
+     SECONDARY
+     ========================= */
+
+  --color-secondary: #242729;
+  --color-secondary-foreground: #ffffff;
+
+  /* =========================
+     MUTED
+     ========================= */
+
+  --color-muted: #242729;
+  --color-muted-foreground: #9a9da1;
+
+  /* =========================
+     ACCENT
+     ========================= */
+
+  --color-accent: #5eb586;
+  --color-accent-foreground: #121315;
+
+  /* =========================
+     BORDERS / INPUTS
+     ========================= */
+
+  --color-border: #303335;
+  --color-input: #303335;
+
+  /* =========================
+     SIDEBAR
+     ========================= */
+
+  --color-sidebar: #121315;
+  --color-sidebar-foreground: #ffffff;
+
+  --color-sidebar-accent: #1a1c1e;
+  --color-sidebar-accent-foreground: #5eb586;
+
+  --color-sidebar-border: #303335;
+
+  /* =========================
+     RADIUS
+     ========================= */
+
+  --radius: 0.625rem;
+}
+
+/* =========================
+   GLOBAL RESET
+   ========================= */
+
+* {
+  box-sizing: border-box;
+  border-color: var(--color-border);
+}
+
+html,
+body,
+#root {
+  width: 100%;
+  min-height: 100%;
+  margin: 0;
+}
+
+/* =========================
+   BODY
+   ========================= */
+
+body {
+  background: var(--color-background);
+  color: var(--color-foreground);
+
+  font-family:
+    Inter,
+    -apple-system,
+    BlinkMacSystemFont,
+    "Segoe UI",
+    sans-serif;
+}
+
+/* =========================
+   FORM ELEMENTS
+   ========================= */
+
+button,
+input,
+select,
+textarea {
+  font: inherit;
+}
+
+button {
+  cursor: pointer;
+}
+
+/* =========================
+   LINKS
+   ========================= */
+
+a {
+  color: inherit;
+  text-decoration: none;
+}
+
+/* =========================
+   TEXT SELECTION
+   ========================= */
+
+::selection {
+  background: #5eb586;
+  color: #121315;
+}
