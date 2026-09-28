@@ -28,23 +28,31 @@ if (!fs.existsSync(uploadsDirectory)) {
 
 /*
 |--------------------------------------------------------------------------
-| MULTER
+| MULTER CONFIGURATION
 |--------------------------------------------------------------------------
 */
 
 const storage = multer.diskStorage({
-  destination: (req, file, callback) => {
+  destination: (
+    req,
+    file,
+    callback,
+  ) => {
     callback(null, uploadsDirectory);
   },
 
-  filename: (req, file, callback) => {
+  filename: (
+    req,
+    file,
+    callback,
+  ) => {
     const extension = path.extname(
-      file.originalname || "",
+      file.originalname,
     );
 
-    const baseName = path
+    const safeBaseName = path
       .basename(
-        file.originalname || "upload",
+        file.originalname,
         extension,
       )
       .replace(
@@ -56,7 +64,7 @@ const storage = multer.diskStorage({
     const fileName =
       `${Date.now()}-${Math.round(
         Math.random() * 1e9,
-      )}-${baseName}${extension}`;
+      )}-${safeBaseName}${extension}`;
 
     callback(null, fileName);
   },
@@ -72,7 +80,7 @@ const upload = multer({
 
 /*
 |--------------------------------------------------------------------------
-| HELPERS
+| HELPER - CANDIDATE QUERY
 |--------------------------------------------------------------------------
 */
 
@@ -87,6 +95,12 @@ function getCandidateQuery(candidateId) {
     id: candidateId,
   };
 }
+
+/*
+|--------------------------------------------------------------------------
+| HELPER - DELETE FILE
+|--------------------------------------------------------------------------
+*/
 
 function deleteUploadedFile(filePath) {
   if (!filePath) {
@@ -105,127 +119,136 @@ function deleteUploadedFile(filePath) {
   }
 }
 
-function getTodayDate() {
-  return new Date()
-    .toISOString()
-    .split("T")[0];
+/*
+|--------------------------------------------------------------------------
+| HELPER - GET HIGHEST CANDIDATE NUMBER
+|--------------------------------------------------------------------------
+|
+| Finds the highest existing CD_XX candidate ID.
+|
+| Example:
+|
+| CD_01
+| CD_02
+| CD_06
+|
+| Highest = 6
+|
+|--------------------------------------------------------------------------
+*/
+
+async function getHighestCandidateNumber(db) {
+  const candidates = await db
+    .collection("candidates")
+    .find(
+      {},
+      {
+        projection: {
+          id: 1,
+        },
+      },
+    )
+    .toArray();
+
+  let highestNumber = 0;
+
+  candidates.forEach((candidate) => {
+    const value = String(
+      candidate.id || "",
+    ).trim();
+
+    const match = value.match(
+      /^CD_(\d+)$/,
+    );
+
+    if (match) {
+      const number = Number(match[1]);
+
+      if (
+        Number.isFinite(number) &&
+        number > highestNumber
+      ) {
+        highestNumber = number;
+      }
+    }
+  });
+
+  return highestNumber;
 }
 
-function getPlanCredits(plan) {
-  const normalizedPlan = String(
-    plan || "",
-  )
-    .trim()
-    .toLowerCase();
+/*
+|--------------------------------------------------------------------------
+| HELPER - CREATE CANDIDATE ID
+|--------------------------------------------------------------------------
+|
+| Generates:
+|
+| CD_01
+| CD_02
+| CD_03
+| CD_04
+|
+|--------------------------------------------------------------------------
+*/
 
-  if (
-    normalizedPlan.includes("1000")
-  ) {
-    return {
-      plan: "1000",
-      credits: 1000,
-    };
-  }
+async function generateCandidateId(db) {
+  const highestNumber =
+    await getHighestCandidateNumber(db);
 
-  if (
-    normalizedPlan.includes("500")
-  ) {
-    return {
-      plan: "500",
-      credits: 500,
-    };
-  }
-
-  if (
-    normalizedPlan.includes("250")
-  ) {
-    return {
-      plan: "250",
-      credits: 250,
-    };
-  }
-
-  return {
-    plan:
-      String(plan || "").trim() ||
-      "250",
-    credits: 250,
-  };
+  return `CD_${String(
+    highestNumber + 1,
+  ).padStart(2, "0")}`;
 }
 
-function calculateDaysRemaining(
-  candidate,
+/*
+|--------------------------------------------------------------------------
+| HELPER - CREATE MULTIPLE UNIQUE CANDIDATE IDS
+|--------------------------------------------------------------------------
+*/
+
+async function generateImportCandidateIds(
+  db,
+  count,
 ) {
-  const explicitDays =
-    Number(
-      candidate?.daysRemaining,
+  const highestNumber =
+    await getHighestCandidateNumber(db);
+
+  const ids = [];
+
+  for (
+    let index = 1;
+    index <= count;
+    index++
+  ) {
+    const nextNumber =
+      highestNumber + index;
+
+    ids.push(
+      `CD_${String(
+        nextNumber,
+      ).padStart(2, "0")}`,
     );
-
-  if (
-    Number.isFinite(explicitDays) &&
-    explicitDays >= 0
-  ) {
-    return explicitDays;
   }
 
-  const programDays =
-    Number(candidate?.programDays);
-
-  if (
-    !Number.isFinite(programDays) ||
-    programDays <= 0
-  ) {
-    return 0;
-  }
-
-  const startDate =
-    candidate?.startDate ||
-    candidate?.programStartDate ||
-    candidate?.createdAt;
-
-  if (!startDate) {
-    return programDays;
-  }
-
-  const start =
-    new Date(startDate);
-
-  if (
-    Number.isNaN(start.getTime())
-  ) {
-    return programDays;
-  }
-
-  const today = new Date();
-
-  const diff =
-    Math.floor(
-      (
-        today.getTime() -
-        start.getTime()
-      ) /
-        (1000 * 60 * 60 * 24),
-    );
-
-  return Math.max(
-    programDays - diff,
-    0,
-  );
+  return ids;
 }
+
+/*
+|--------------------------------------------------------------------------
+| HELPER - FIND CANDIDATE
+|--------------------------------------------------------------------------
+*/
 
 async function findCandidate(
   db,
   candidateId,
 ) {
   const query =
-    getCandidateQuery(
-      candidateId,
-    );
+    getCandidateQuery(candidateId);
 
-  const candidate =
-    await db
-      .collection("candidates")
-      .findOne(query);
+  const candidate = await db
+    .collection("candidates")
+    .findOne(query);
 
   return {
     candidate,
@@ -233,21 +256,283 @@ async function findCandidate(
   };
 }
 
-function normalizeImportHeader(
-  value,
-) {
-  return String(value || "")
-    .trim()
-    .toLowerCase()
-    .replace(
-      /[^a-z0-9]/g,
-      "",
-    );
+/*
+|--------------------------------------------------------------------------
+| HELPER - PLAN CREDITS
+|--------------------------------------------------------------------------
+|
+| IMPORTANT:
+|
+| 100 Applications  = 100 credits
+| 250 Applications  = 250 credits
+| 500 Applications  = 500 credits
+| 1000 Applications = 1000 credits
+|
+|--------------------------------------------------------------------------
+*/
+
+function getPlanCredits(plan) {
+  const rawPlan = String(
+    plan || "",
+  ).trim();
+
+  /*
+  Extract the plan number.
+  */
+
+  const planNumber =
+    rawPlan.match(
+      /(?:^|\s)(100|250|500|1000)(?:\s|$)/,
+    )?.[1] ||
+    rawPlan.match(
+      /^(100|250|500|1000)$/,
+    )?.[1] ||
+    "100";
+
+  const planCredits = {
+    "100": 100,
+    "250": 250,
+    "500": 500,
+    "1000": 1000,
+  };
+
+  const credits =
+    planCredits[planNumber] ?? 100;
+
+  return {
+    plan: `${planNumber} Applications`,
+    credits,
+  };
 }
 
-function normalizeImportValue(
-  value,
-) {
+/*
+|--------------------------------------------------------------------------
+| HELPER - NORMALIZE IMPORT VALUE
+|--------------------------------------------------------------------------
+*/
+
+/*
+|--------------------------------------------------------------------------
+| HELPER - NORMALIZE EXCEL DATE
+|--------------------------------------------------------------------------
+|
+| The Add Candidate flow stores the date as YYYY-MM-DD.
+| Excel can return a real Date object when cellDates=true, which
+| otherwise becomes a value such as:
+| "Sun Sep 27 2026 23:59:50 GMT+0530 ..."
+|
+| Always convert imported dates to YYYY-MM-DD before saving.
+|--------------------------------------------------------------------------
+*/
+
+function normalizeExcelDate(value) {
+  if (
+    value === null ||
+    value === undefined ||
+    value === ""
+  ) {
+    return "";
+  }
+
+  /*
+  ------------------------------------------------------------
+  EXCEL SERIAL DATE
+  ------------------------------------------------------------
+
+  Excel stores dates as numbers.
+
+  Example:
+  46293 = 09/28/2026
+
+  Do NOT use:
+  XLSX.SSF.parse_date_code()
+
+  because some XLSX versions do not expose XLSX.SSF.
+
+  Instead, convert the Excel serial number directly.
+  ------------------------------------------------------------
+  */
+  if (
+    typeof value === "number" &&
+    Number.isFinite(value)
+  ) {
+    const excelEpoch =
+      Date.UTC(1899, 11, 30);
+
+    const milliseconds =
+      value * 24 * 60 * 60 * 1000;
+
+    const date =
+      new Date(
+        excelEpoch + milliseconds,
+      );
+
+    if (
+      !Number.isNaN(
+        date.getTime(),
+      )
+    ) {
+      const year =
+        date.getUTCFullYear();
+
+      const month =
+        String(
+          date.getUTCMonth() + 1,
+        ).padStart(2, "0");
+
+      const day =
+        String(
+          date.getUTCDate(),
+        ).padStart(2, "0");
+
+      return `${year}-${month}-${day}`;
+    }
+  }
+
+  /*
+  ------------------------------------------------------------
+  JAVASCRIPT DATE OBJECT
+  ------------------------------------------------------------
+  */
+
+  if (value instanceof Date) {
+    if (
+      Number.isNaN(
+        value.getTime(),
+      )
+    ) {
+      return "";
+    }
+
+    const year =
+      value.getFullYear();
+
+    const month =
+      String(
+        value.getMonth() + 1,
+      ).padStart(2, "0");
+
+    const day =
+      String(
+        value.getDate(),
+      ).padStart(2, "0");
+
+    return `${year}-${month}-${day}`;
+  }
+
+  /*
+  ------------------------------------------------------------
+  STRING DATE
+  ------------------------------------------------------------
+  */
+
+  const raw =
+    String(value).trim();
+
+  if (!raw) {
+    return "";
+  }
+
+  /*
+  Already YYYY-MM-DD
+  */
+
+  const yyyyMmDd =
+    raw.match(
+      /^(\d{4})-(\d{2})-(\d{2})$/,
+    );
+
+  if (yyyyMmDd) {
+    return (
+      `${yyyyMmDd[1]}-${yyyyMmDd[2]}-${yyyyMmDd[3]}`
+    );
+  }
+
+  /*
+  MM/DD/YYYY
+  */
+
+  const mmDdYyyy =
+    raw.match(
+      /^(\d{1,2})\/(\d{1,2})\/(\d{4})$/,
+    );
+
+  if (mmDdYyyy) {
+    const month =
+      String(
+        Number(mmDdYyyy[1]),
+      ).padStart(2, "0");
+
+    const day =
+      String(
+        Number(mmDdYyyy[2]),
+      ).padStart(2, "0");
+
+    const year =
+      mmDdYyyy[3];
+
+    return `${year}-${month}-${day}`;
+  }
+
+  /*
+  ISO DATE/TIME
+
+  Example:
+  2026-09-28T00:00:00
+  */
+
+  const isoDate =
+    raw.match(
+      /^(\d{4})-(\d{2})-(\d{2})T/,
+    );
+
+  if (isoDate) {
+    return (
+      `${isoDate[1]}-${isoDate[2]}-${isoDate[3]}`
+    );
+  }
+
+  /*
+  JavaScript date string
+
+  Example:
+  Sun Sep 27 2026 23:59:50 GMT+0530
+  */
+
+  const parsed =
+    new Date(raw);
+
+  if (
+    !Number.isNaN(
+      parsed.getTime(),
+    )
+  ) {
+    const year =
+      parsed.getFullYear();
+
+    const month =
+      String(
+        parsed.getMonth() + 1,
+      ).padStart(2, "0");
+
+    const day =
+      String(
+        parsed.getDate(),
+      ).padStart(2, "0");
+
+    return `${year}-${month}-${day}`;
+  }
+
+  /*
+  Unknown format.
+  Return the original value rather
+  than crashing the import.
+  */
+
+  return raw;
+}
+
+function normalizeImportValue(value) {
   if (
     value === null ||
     value === undefined
@@ -255,67 +540,99 @@ function normalizeImportValue(
     return "";
   }
 
-  if (
-    value instanceof Date
-  ) {
-    return value
-      .toISOString()
-      .split("T")[0];
-  }
-
   return String(value).trim();
 }
 
-async function generateCandidateId(
-  db,
+/*
+|--------------------------------------------------------------------------
+| HELPER - NORMALIZE EXCEL HEADER
+|--------------------------------------------------------------------------
+*/
+
+function normalizeImportHeader(header) {
+  return String(header || "")
+    .trim()
+    .toLowerCase()
+    .replace(/[\s_-]+/g, "");
+}
+
+/*
+|--------------------------------------------------------------------------
+| APPLICATION HELPERS
+|--------------------------------------------------------------------------
+*/
+
+function getTodayDate() {
+  const today = new Date();
+
+  const year =
+    today.getFullYear();
+
+  const month = String(
+    today.getMonth() + 1,
+  ).padStart(2, "0");
+
+  const day = String(
+    today.getDate(),
+  ).padStart(2, "0");
+
+  return `${year}-${month}-${day}`;
+}
+
+function generateApplicationId() {
+  return `APP_${Date.now()}_${Math.floor(
+    Math.random() * 100000,
+  )}`;
+}
+
+/*
+|--------------------------------------------------------------------------
+| HELPER - CALCULATE DAYS LEFT
+|--------------------------------------------------------------------------
+*/
+
+function calculateDaysRemaining(
+  candidate,
 ) {
-  const candidates =
-    await db
-      .collection("candidates")
-      .find(
-        {
-          id: {
-            $regex: /^CAND-\d+$/,
-          },
-        },
-        {
-          projection: {
-            id: 1,
-          },
-        },
-      )
-      .toArray();
+  const programDays =
+    Number(
+      candidate.programDays,
+    ) || 0;
 
-  let maxNumber = 0;
+  const applicationHistory =
+    Array.isArray(
+      candidate.applicationHistory,
+    )
+      ? candidate.applicationHistory
+      : [];
 
-  for (
-    const candidate of candidates
-  ) {
-    const match =
-      String(
-        candidate.id || "",
-      ).match(
-        /^CAND-(\d+)$/,
-      );
+  const uniqueApplicationDates =
+    new Set(
+      applicationHistory
+        .map((item) =>
+          String(
+            item?.date || "",
+          ).trim(),
+        )
+        .filter(Boolean),
+    );
 
-    if (match) {
-      maxNumber = Math.max(
-        maxNumber,
-        Number(match[1]),
-      );
-    }
-  }
+  const daysUsed =
+    uniqueApplicationDates.size;
 
-  return `CAND-${String(
-    maxNumber + 1,
-  ).padStart(4, "0")}`;
+  return Math.max(
+    programDays - daysUsed,
+    0,
+  );
 }
 
 /*
 |--------------------------------------------------------------------------
 | GET ALL CANDIDATES
 |--------------------------------------------------------------------------
+|
 | GET /api/candidates
+|
 |--------------------------------------------------------------------------
 */
 
@@ -323,11 +640,14 @@ router.get(
   "/",
   async (req, res) => {
     try {
-      const db = getDatabase();
+      const db =
+        getDatabase();
 
       const candidates =
         await db
-          .collection("candidates")
+          .collection(
+            "candidates",
+          )
           .find({})
           .sort({
             createdAt: 1,
@@ -335,7 +655,7 @@ router.get(
           })
           .toArray();
 
-      const result =
+      const candidatesWithDays =
         candidates.map(
           (candidate) => ({
             ...candidate,
@@ -347,7 +667,9 @@ router.get(
           }),
         );
 
-      return res.json(result);
+      return res.json(
+        candidatesWithDays,
+      );
     } catch (error) {
       console.error(
         "Error fetching candidates:",
@@ -355,7 +677,6 @@ router.get(
       );
 
       return res.status(500).json({
-        success: false,
         message:
           "Failed to fetch candidates.",
       });
@@ -367,7 +688,9 @@ router.get(
 |--------------------------------------------------------------------------
 | CREATE CANDIDATE
 |--------------------------------------------------------------------------
+|
 | POST /api/candidates
+|
 |--------------------------------------------------------------------------
 */
 
@@ -375,18 +698,33 @@ router.post(
   "/",
   async (req, res) => {
     try {
-      const db = getDatabase();
+      const db =
+        getDatabase();
 
       const body =
         req.body || {};
 
+      /*
+      PLAN → CREDITS
+
+      Backend calculates credits
+      from the selected plan.
+
+      This prevents frontend values
+      such as 250 from accidentally
+      being stored for a 100-plan.
+      */
+
       const {
-        plan,
-        credits,
+        plan: selectedPlan,
+        credits: creditsTotal,
       } =
         getPlanCredits(
           body.plan,
         );
+
+      const creditsRemaining =
+        creditsTotal;
 
       const programDays =
         Math.max(
@@ -396,49 +734,67 @@ router.post(
           0,
         );
 
+      /*
+      ------------------------------------------------
+      IMPORTANT ID FIX
+      ------------------------------------------------
+
+      DO NOT use body.id here.
+
+      Older frontend data may send:
+      CAND-0001
+
+      We always generate:
+      CD_01
+      CD_02
+      CD_03
+      etc.
+      */
+
       const candidateId =
-        body.id &&
-        String(body.id).trim()
-          ? String(body.id).trim()
-          : await generateCandidateId(
-              db,
-            );
+        await generateCandidateId(
+          db,
+        );
 
       const now =
         new Date();
 
-      const candidate = {
+      /*
+      ------------------------------------------------
+      CREATE CANDIDATE
+      ------------------------------------------------
+      */
+
+      const newCandidate = {
         ...body,
 
+        /*
+        Backend-generated ID.
+        */
         id: candidateId,
 
-        plan,
+        /*
+        Backend-normalized plan.
+        */
+        plan: selectedPlan,
 
         programDays,
 
         daysRemaining:
           programDays,
 
-        creditsTotal:
-          Number(
-            body.creditsTotal,
-          ) || credits,
+        /*
+        Backend-calculated credits.
+        */
+        creditsTotal,
 
-        creditsRemaining:
-          Number.isFinite(
-            Number(
-              body.creditsRemaining,
-            ),
-          )
-            ? Number(
-                body.creditsRemaining,
-              )
-            : credits,
+        creditsRemaining,
 
-        creditsUsed:
-          Number(
-            body.creditsUsed,
-          ) || 0,
+        /*
+        New candidate always starts
+        with zero used credits.
+        */
+        creditsUsed: 0,
 
         monthly:
           Array.isArray(
@@ -466,13 +822,6 @@ router.post(
             body.uploadedMARReports,
           )
             ? body.uploadedMARReports
-            : [],
-
-        programActivities:
-          Array.isArray(
-            body.programActivities,
-          )
-            ? body.programActivities
             : [],
 
         applicationHistory:
@@ -503,16 +852,21 @@ router.post(
 
       const result =
         await db
-          .collection("candidates")
+          .collection(
+            "candidates",
+          )
           .insertOne(
-            candidate,
+            newCandidate,
           );
 
-      return res.status(201).json({
-        ...candidate,
-        _id:
-          result.insertedId,
-      });
+      return res
+        .status(201)
+        .json({
+          ...newCandidate,
+
+          _id:
+            result.insertedId,
+        });
     } catch (error) {
       console.error(
         "Error creating candidate:",
@@ -520,29 +874,36 @@ router.post(
       );
 
       if (
-        error?.code === 11000
+        error?.code ===
+        11000
       ) {
-        return res.status(400).json({
-          success: false,
-          message:
-            "A candidate with this email or ID already exists.",
-        });
+        return res
+          .status(400)
+          .json({
+            success: false,
+
+            message:
+              "A candidate with this email or ID already exists.",
+          });
       }
 
-      return res.status(500).json({
-        success: false,
-        message:
-          "Failed to create candidate.",
-      });
+      return res
+        .status(500)
+        .json({
+          message:
+            "Failed to create candidate.",
+        });
     }
   },
 );
 
 /*
 |--------------------------------------------------------------------------
-| IMPORT CANDIDATES
+| IMPORT CANDIDATES FROM EXCEL / CSV
 |--------------------------------------------------------------------------
+|
 | POST /api/candidates/import
+|
 |--------------------------------------------------------------------------
 */
 
@@ -551,8 +912,13 @@ router.post(
   upload.single("file"),
   async (req, res) => {
     try {
-      const db =
-        getDatabase();
+      const db = getDatabase();
+
+      /*
+      ============================================================
+      FILE VALIDATION
+      ============================================================
+      */
 
       if (!req.file) {
         return res.status(400).json({
@@ -562,19 +928,20 @@ router.post(
         });
       }
 
-      const extension =
-        path
-          .extname(
-            req.file.originalname,
-          )
-          .toLowerCase();
+      const extension = path
+        .extname(req.file.originalname)
+        .toLowerCase();
+
+      const allowedExtensions = [
+        ".xlsx",
+        ".xls",
+        ".csv",
+      ];
 
       if (
-        ![
-          ".xlsx",
-          ".xls",
-          ".csv",
-        ].includes(extension)
+        !allowedExtensions.includes(
+          extension,
+        )
       ) {
         deleteUploadedFile(
           req.file.path,
@@ -583,18 +950,24 @@ router.post(
         return res.status(400).json({
           success: false,
           message:
-            "Only Excel and CSV files are supported.",
+            "Only .xlsx, .xls, and .csv files are supported.",
         });
       }
 
-      const workbook =
-        XLSX.read(
-          req.file.path,
-          {
-            type: "file",
-            cellDates: true,
-          },
-        );
+      /*
+      ============================================================
+      READ EXCEL / CSV
+      ============================================================
+      */
+
+      const workbook = XLSX.read(
+        req.file.path,
+        {
+          type: "file",
+          cellDates: false,
+          cellNF: true,
+        },
+      );
 
       const sheetName =
         workbook.SheetNames[0];
@@ -611,11 +984,12 @@ router.post(
         });
       }
 
+      const worksheet =
+        workbook.Sheets[sheetName];
+
       const rows =
         XLSX.utils.sheet_to_json(
-          workbook.Sheets[
-            sheetName
-          ],
+          worksheet,
           {
             defval: "",
           },
@@ -629,126 +1003,541 @@ router.post(
         return res.status(400).json({
           success: false,
           message:
-            "The uploaded file is empty.",
+            "The uploaded Excel file is empty.",
         });
       }
 
-      const inserted =
-        [];
+      /*
+      ============================================================
+      HEADER NORMALIZATION
+      ============================================================
+      */
 
-      const skipped =
-        [];
-
-      for (
-        const rawRow of rows
+      function normalizeHeader(
+        value,
       ) {
-        const row = {};
+        return String(value || "")
+          .trim()
+          .toLowerCase()
+          .replace(/[^a-z0-9]/g, "");
+      }
+
+      function getColumnValue(
+        row,
+        aliases,
+        preserveType = false,
+      ) {
+        const normalizedRow = {};
+
+        Object.keys(row).forEach(
+          (key) => {
+            normalizedRow[
+              normalizeHeader(key)
+            ] = row[key];
+          },
+        );
 
         for (
-          const [
-            key,
-            value,
-          ] of Object.entries(
-            rawRow,
-          )
+          const alias of aliases
         ) {
-          row[
-            normalizeImportHeader(
-              key,
-            )
-          ] =
-            normalizeImportValue(
-              value,
+          const normalizedAlias =
+            normalizeHeader(
+              alias,
             );
+
+          if (
+            Object.prototype.hasOwnProperty.call(
+              normalizedRow,
+              normalizedAlias,
+            )
+          ) {
+            const value =
+              normalizedRow[
+                normalizedAlias
+              ];
+
+            if (
+              value !== null &&
+              value !== undefined &&
+              String(value).trim() !==
+                ""
+            ) {
+              if (preserveType) {
+                return value;
+              }
+
+              return String(
+                value,
+              ).trim();
+            }
+          }
         }
 
-        const name =
-          row.name ||
-          row.fullname ||
-          row.candidatename ||
-          "";
+        return "";
+      }
 
-        const email =
-          String(
-            row.email || "",
-          )
-            .trim()
-            .toLowerCase();
+      /*
+      ============================================================
+      PLAN → CREDITS
+      ============================================================
+      */
+
+      function getImportedPlanCredits(
+        planValue,
+      ) {
+        const rawPlan = String(
+          planValue || "",
+        )
+          .trim()
+          .toLowerCase();
 
         if (
-          !name &&
-          !email
+          rawPlan.includes("1000")
         ) {
-          skipped.push({
+          return {
+            plan:
+              "1000 Applications",
+            credits: 1000,
+          };
+        }
+
+        if (
+          rawPlan.includes("500")
+        ) {
+          return {
+            plan:
+              "500 Applications",
+            credits: 500,
+          };
+        }
+
+        if (
+          rawPlan.includes("250")
+        ) {
+          return {
+            plan:
+              "250 Applications",
+            credits: 250,
+          };
+        }
+
+        /*
+        Default to 100 applications.
+        */
+
+        return {
+          plan:
+            "100 Applications",
+          credits: 100,
+        };
+      }
+
+      /*
+      ============================================================
+      FIND HIGHEST CD_XX ID
+      ============================================================
+      */
+
+      async function getHighestCDNumber() {
+        const existingCandidates =
+          await db
+            .collection(
+              "candidates",
+            )
+            .find(
+              {},
+              {
+                projection: {
+                  id: 1,
+                },
+              },
+            )
+            .toArray();
+
+        let highestNumber = 0;
+
+        existingCandidates.forEach(
+          (candidate) => {
+            const candidateId =
+              String(
+                candidate.id || "",
+              ).trim();
+
+            const match =
+              candidateId.match(
+                /^CD_(\d+)$/i,
+              );
+
+            if (match) {
+              const number =
+                Number(
+                  match[1],
+                );
+
+              if (
+                Number.isFinite(
+                  number,
+                ) &&
+                number >
+                  highestNumber
+              ) {
+                highestNumber =
+                  number;
+              }
+            }
+          },
+        );
+
+        return highestNumber;
+      }
+
+      /*
+      ============================================================
+      GET EXISTING EMAILS
+      ============================================================
+      */
+
+      const existingCandidates =
+        await db
+          .collection(
+            "candidates",
+          )
+          .find(
+            {},
+            {
+              projection: {
+                email: 1,
+                id: 1,
+              },
+            },
+          )
+          .toArray();
+
+      const existingEmails =
+        new Set(
+          existingCandidates
+            .map(
+              (candidate) =>
+                String(
+                  candidate.email ||
+                    "",
+                )
+                  .trim()
+                  .toLowerCase(),
+            )
+            .filter(Boolean),
+        );
+
+      /*
+      ============================================================
+      PROCESS EXCEL ROWS
+      ============================================================
+      */
+
+      const candidatesToInsert =
+        [];
+
+      const skippedRows = [];
+
+      const uploadedEmails =
+        new Set();
+
+      let nextCandidateNumber =
+        await getHighestCDNumber();
+
+      for (
+        let index = 0;
+        index < rows.length;
+        index++
+      ) {
+        const row =
+          rows[index];
+
+        const excelRowNumber =
+          index + 2;
+
+        /*
+        ----------------------------------------------------------
+        SUPPORT MULTIPLE EXCEL HEADER NAMES
+        ----------------------------------------------------------
+        */
+
+        const name =
+          getColumnValue(row, [
+            "name",
+            "fullname",
+            "candidate name",
+            "candidate_name",
+            "candidateName",
+          ]);
+
+        const email =
+          getColumnValue(row, [
+            "email",
+            "emailaddress",
+            "email address",
+            "candidate email",
+            "candidate_email",
+            "candidateEmail",
+          ]);
+
+        const phone =
+          getColumnValue(row, [
+            "phone",
+            "phonenumber",
+            "phone number",
+            "mobile",
+            "mobile number",
+          ]);
+
+        const location =
+          getColumnValue(row, [
+            "location",
+            "city",
+            "citystate",
+            "city state",
+          ]);
+
+        const domain =
+          getColumnValue(row, [
+            "domain",
+            "industry",
+          ]);
+
+        const targetRole =
+          getColumnValue(row, [
+            "targetrole",
+            "target role",
+            "role",
+            "jobrole",
+            "job role",
+          ]);
+
+        const experience =
+          getColumnValue(row, [
+            "experience",
+            "years of experience",
+            "yearsofexperience",
+          ]);
+
+        const planValue =
+          getColumnValue(row, [
+            "plan",
+            "application plan",
+            "applicationplan",
+          ]);
+
+        const programDaysValue =
+          getColumnValue(row, [
+            "programdays",
+            "program days",
+            "duration",
+            "days",
+          ]);
+
+        const assignedSpecialist =
+          getColumnValue(row, [
+            "assignedspecialist",
+            "assigned specialist",
+            "specialist",
+            "assignedexpert",
+            "assigned expert",
+          ]);
+
+        const startDateRaw =
+          getColumnValue(
+            row,
+            [
+              "startdate",
+              "start date",
+              "programstartdate",
+              "program start date",
+            ],
+            true,
+          );
+
+        // IMPORTANT:
+        // Normalize Excel dates to the same YYYY-MM-DD format
+        // used by Add Candidate before saving to MongoDB.
+        const startDate =
+          normalizeExcelDate(startDateRaw);
+
+        const status =
+          getColumnValue(row, [
+            "status",
+          ]) ||
+          "Active";
+
+        const notes =
+          getColumnValue(row, [
+            "notes",
+            "note",
+          ]);
+
+        /*
+        ----------------------------------------------------------
+        REQUIRED FIELD VALIDATION
+        ----------------------------------------------------------
+        */
+
+        if (!name) {
+          skippedRows.push({
+            row:
+              excelRowNumber,
+            email,
             reason:
-              "Name and email are missing.",
-            row: rawRow,
+              "Candidate name is missing.",
           });
 
           continue;
         }
 
         if (!email) {
-          skipped.push({
+          skippedRows.push({
+            row:
+              excelRowNumber,
+            email: "",
             reason:
-              "Email is missing.",
-            row: rawRow,
+              "Email address is missing.",
           });
 
           continue;
         }
 
-        const existing =
-          await db
-            .collection(
-              "candidates",
-            )
-            .findOne({
-              email,
-            });
+        const normalizedEmail =
+          email
+            .trim()
+            .toLowerCase();
 
-        if (existing) {
-          skipped.push({
+        /*
+        ----------------------------------------------------------
+        DUPLICATE EMAIL IN DATABASE
+        ----------------------------------------------------------
+        */
+
+        if (
+          existingEmails.has(
+            normalizedEmail,
+          )
+        ) {
+          skippedRows.push({
+            row:
+              excelRowNumber,
+            email:
+              normalizedEmail,
             reason:
-              "Candidate already exists.",
-            email,
+              "A candidate with this email already exists.",
           });
 
           continue;
         }
+
+        /*
+        ----------------------------------------------------------
+        DUPLICATE EMAIL INSIDE CURRENT EXCEL
+        ----------------------------------------------------------
+        */
+
+        if (
+          uploadedEmails.has(
+            normalizedEmail,
+          )
+        ) {
+          skippedRows.push({
+            row:
+              excelRowNumber,
+            email:
+              normalizedEmail,
+            reason:
+              "Duplicate email found in the Excel file.",
+          });
+
+          continue;
+        }
+
+        uploadedEmails.add(
+          normalizedEmail,
+        );
+
+        /*
+        ----------------------------------------------------------
+        GENERATE CD_XX ID
+        ----------------------------------------------------------
+        */
+
+        nextCandidateNumber +=
+          1;
+
+        const candidateId =
+          `CD_${String(
+            nextCandidateNumber,
+          ).padStart(2, "0")}`;
+
+        /*
+        ----------------------------------------------------------
+        PLAN / CREDITS
+        ----------------------------------------------------------
+        */
 
         const {
           plan,
           credits,
         } =
-          getPlanCredits(
-            row.plan,
+          getImportedPlanCredits(
+            planValue,
           );
+
+        /*
+        ----------------------------------------------------------
+        PROGRAM DAYS
+        ----------------------------------------------------------
+        */
 
         const programDays =
           Math.max(
             Number(
-              row.programdays,
-            ) || 0,
+              programDaysValue,
+            ) || 45,
             0,
           );
+
+        /*
+        ----------------------------------------------------------
+        CREATE CANDIDATE OBJECT
+        ----------------------------------------------------------
+        */
 
         const now =
           new Date();
 
-        const candidateId =
-          await generateCandidateId(
-            db,
-          );
-
         const candidate = {
-          ...rawRow,
+          id:
+            candidateId,
 
-          id: candidateId,
+          name:
+            name.trim(),
 
-          name,
+          email:
+            normalizedEmail,
 
-          email,
+          phone:
+            phone || "",
+
+          location:
+            location || "",
+
+          domain:
+            domain || "",
+
+          targetRole:
+            targetRole || "",
+
+          experience:
+            experience || "",
+
+          /*
+          EXACT PLAN FROM EXCEL
+          */
 
           plan,
 
@@ -757,6 +1546,10 @@ router.post(
           daysRemaining:
             programDays,
 
+          /*
+          EXACT PLAN CREDIT VALUE
+          */
+
           creditsTotal:
             credits,
 
@@ -764,6 +1557,19 @@ router.post(
             credits,
 
           creditsUsed: 0,
+
+          assignedSpecialist:
+            assignedSpecialist ||
+            "",
+
+          startDate:
+            startDate || "",
+
+          status:
+            status || "Active",
+
+          notes:
+            notes || "",
 
           monthly: [],
 
@@ -786,42 +1592,155 @@ router.post(
           updatedAt: now,
         };
 
-        await db
-          .collection(
-            "candidates",
-          )
-          .insertOne(
-            candidate,
-          );
-
-        inserted.push(
+        candidatesToInsert.push(
           candidate,
         );
       }
+
+      /*
+      ============================================================
+      NO VALID CANDIDATES
+      ============================================================
+      */
+
+      if (
+        candidatesToInsert.length ===
+        0
+      ) {
+        deleteUploadedFile(
+          req.file.path,
+        );
+
+        return res.status(200).json({
+          success: true,
+
+          message:
+            "No new candidates were imported.",
+
+          imported: 0,
+
+          skipped:
+            skippedRows.length,
+
+          skippedRows,
+
+          data: [],
+        });
+      }
+
+      /*
+      ============================================================
+      INSERT CANDIDATES
+      ============================================================
+      */
+
+      let insertedCandidates =
+        [];
+
+      try {
+        const result =
+          await db
+            .collection(
+              "candidates",
+            )
+            .insertMany(
+              candidatesToInsert,
+              {
+                ordered: true,
+              },
+            );
+
+        insertedCandidates =
+          candidatesToInsert.map(
+            (
+              candidate,
+              index,
+            ) => ({
+              ...candidate,
+
+              _id:
+                result
+                  .insertedIds[
+                  index
+                ],
+            }),
+          );
+      } catch (
+        insertError
+      ) {
+        console.error(
+          "Excel import database error:",
+          insertError,
+        );
+
+        deleteUploadedFile(
+          req.file.path,
+        );
+
+        /*
+        Duplicate-key error
+        */
+
+        if (
+          insertError?.code ===
+          11000
+        ) {
+          return res
+            .status(400)
+            .json({
+              success: false,
+
+              message:
+                "One or more candidates already exist. Please check duplicate email addresses.",
+
+              imported: 0,
+
+              skipped:
+                skippedRows.length,
+
+              skippedRows,
+            });
+        }
+
+        throw insertError;
+      }
+
+      /*
+      ============================================================
+      DELETE TEMPORARY UPLOAD
+      ============================================================
+      */
 
       deleteUploadedFile(
         req.file.path,
       );
 
-      return res.status(201).json({
+      /*
+      ============================================================
+      SUCCESS RESPONSE
+      ============================================================
+      */
+
+      return res.status(200).json({
         success: true,
 
         message:
-          "Candidates imported successfully.",
+          `${insertedCandidates.length} candidate(s) imported successfully.`,
 
-        insertedCount:
-          inserted.length,
+        imported:
+          insertedCandidates.length,
 
-        skippedCount:
-          skipped.length,
+        skipped:
+          skippedRows.length,
 
-        data: inserted,
+        skippedRows,
 
-        skipped,
+        data:
+          insertedCandidates,
       });
     } catch (error) {
       console.error(
-        "Error importing candidates:",
+        "Excel candidate import failed:",
         error,
       );
 
@@ -831,9 +1750,16 @@ router.post(
 
       return res.status(500).json({
         success: false,
+
         message:
           error?.message ||
-          "Failed to import candidates.",
+          "Failed to import candidates from Excel.",
+
+        imported: 0,
+
+        skipped: 0,
+
+        skippedRows: [],
       });
     }
   },
@@ -842,8 +1768,6 @@ router.post(
 /*
 |--------------------------------------------------------------------------
 | GET REPORTS
-|--------------------------------------------------------------------------
-| GET /api/candidates/:candidateId/reports
 |--------------------------------------------------------------------------
 */
 
@@ -859,20 +1783,20 @@ router.get(
       } =
         await findCandidate(
           db,
-          req.params.candidateId,
+          req.params
+            .candidateId,
         );
 
       if (!candidate) {
-        return res.status(404).json({
-          success: false,
-          message:
-            "Candidate not found.",
-        });
+        return res
+          .status(404)
+          .json({
+            message:
+              "Candidate not found.",
+          });
       }
 
       return res.json({
-        success: true,
-
         data:
           Array.isArray(
             candidate.uploadedReports,
@@ -886,11 +1810,12 @@ router.get(
         error,
       );
 
-      return res.status(500).json({
-        success: false,
-        message:
-          "Failed to fetch reports.",
-      });
+      return res
+        .status(500)
+        .json({
+          message:
+            "Failed to fetch reports.",
+        });
     }
   },
 );
@@ -898,8 +1823,6 @@ router.get(
 /*
 |--------------------------------------------------------------------------
 | UPLOAD REPORT / INTERVIEW CALL / OFFER LETTER
-|--------------------------------------------------------------------------
-| POST /api/candidates/:candidateId/reports
 |--------------------------------------------------------------------------
 */
 
@@ -917,7 +1840,8 @@ router.post(
       } =
         await findCandidate(
           db,
-          req.params.candidateId,
+          req.params
+            .candidateId,
         );
 
       if (!candidate) {
@@ -925,94 +1849,92 @@ router.post(
           req.file?.path,
         );
 
-        return res.status(404).json({
-          success: false,
-          message:
-            "Candidate not found.",
-        });
+        return res
+          .status(404)
+          .json({
+            message:
+              "Candidate not found.",
+          });
       }
 
       if (!req.file) {
-        return res.status(400).json({
-          success: false,
-          message:
-            "Please select a file.",
-        });
+        return res
+          .status(400)
+          .json({
+            message:
+              "Please select a file.",
+          });
       }
 
       const type =
         String(
-          req.body.type || "",
+          req.body.type ||
+            "",
         ).trim();
 
       const company =
         String(
-          req.body.company || "",
+          req.body.company ||
+            "",
         ).trim();
 
       const role =
         String(
-          req.body.role || "",
+          req.body.role ||
+            "",
         ).trim();
 
       const reportType =
         String(
-          req.body.reportType || "",
+          req.body.reportType ||
+            "",
         ).trim();
 
       /*
-      IMPORTANT:
-      OFFER LETTER IS INCLUDED HERE.
+      VALID TYPES
       */
 
-      const allowedTypes = [
-        "Interview Call",
-        "Report",
-        "Offer Letter",
-      ];
-
       if (
-        !allowedTypes.includes(
-          type,
-        )
+        type !==
+          "Interview Call" &&
+        type !== "Report" &&
+        type !== "Offer Letter"
       ) {
         deleteUploadedFile(
           req.file.path,
         );
 
-        return res.status(400).json({
-          success: false,
-          message:
-            "Please select Interview Call, Report, or Offer Letter.",
-        });
+        return res
+          .status(400)
+          .json({
+            message:
+              "Please select Interview Call, Report, or Offer Letter.",
+          });
       }
 
       /*
-      ==================================================
       INTERVIEW CALL
-      ==================================================
       */
 
       if (
-        type === "Interview Call"
+        type ===
+        "Interview Call"
       ) {
-        const isImage =
-          String(
-            req.file.mimetype || "",
-          ).startsWith(
+        if (
+          !req.file.mimetype.startsWith(
             "image/",
-          );
-
-        if (!isImage) {
+          )
+        ) {
           deleteUploadedFile(
             req.file.path,
           );
 
-          return res.status(400).json({
-            success: false,
-            message:
-              "Interview Call upload must be an image.",
-          });
+          return res
+            .status(400)
+            .json({
+              message:
+                "Interview Call upload must be an image.",
+            });
         }
 
         if (!company) {
@@ -1020,11 +1942,12 @@ router.post(
             req.file.path,
           );
 
-          return res.status(400).json({
-            success: false,
-            message:
-              "Company name is required.",
-          });
+          return res
+            .status(400)
+            .json({
+              message:
+                "Company name is required.",
+            });
         }
 
         if (!role) {
@@ -1032,50 +1955,57 @@ router.post(
             req.file.path,
           );
 
-          return res.status(400).json({
-            success: false,
-            message:
-              "Role is required.",
-          });
+          return res
+            .status(400)
+            .json({
+              message:
+                "Role is required.",
+            });
         }
       }
 
       /*
-      ==================================================
-      NORMAL REPORT
-      ==================================================
+      REPORT
       */
 
       if (
         type === "Report"
       ) {
-        const isPDF =
-          req.file.mimetype ===
-            "application/pdf" ||
-          String(
-            req.file.originalname ||
-              "",
-          )
-            .toLowerCase()
-            .endsWith(".pdf");
-
-        if (!isPDF) {
+        if (
+          req.file.mimetype !==
+          "application/pdf"
+        ) {
           deleteUploadedFile(
             req.file.path,
           );
 
-          return res.status(400).json({
-            success: false,
-            message:
-              "Report upload must be a PDF file.",
-          });
+          return res
+            .status(400)
+            .json({
+              message:
+                "Report upload must be a PDF file.",
+            });
         }
 
-        const allowedReportTypes = [
-          "15 Days Report",
-          "Monthly Report",
-          "Final Report",
-        ];
+        if (!reportType) {
+          deleteUploadedFile(
+            req.file.path,
+          );
+
+          return res
+            .status(400)
+            .json({
+              message:
+                "Please select a report type.",
+            });
+        }
+
+        const allowedReportTypes =
+          [
+            "15 Days Report",
+            "Monthly Report",
+            "Final Report",
+          ];
 
         if (
           !allowedReportTypes.includes(
@@ -1086,43 +2016,47 @@ router.post(
             req.file.path,
           );
 
-          return res.status(400).json({
-            success: false,
-            message:
-              "Please select a valid report type.",
-          });
+          return res
+            .status(400)
+            .json({
+              message:
+                "Invalid report type.",
+            });
         }
       }
 
       /*
-      ==================================================
       OFFER LETTER
-      ==================================================
       */
 
       if (
-        type === "Offer Letter"
+        type ===
+        "Offer Letter"
       ) {
         const isPDF =
           req.file.mimetype ===
             "application/pdf" ||
           String(
-            req.file.originalname ||
+            req.file
+              .originalname ||
               "",
           )
             .toLowerCase()
-            .endsWith(".pdf");
+            .endsWith(
+              ".pdf",
+            );
 
         if (!isPDF) {
           deleteUploadedFile(
             req.file.path,
           );
 
-          return res.status(400).json({
-            success: false,
-            message:
-              "Offer Letter upload must be a PDF file.",
-          });
+          return res
+            .status(400)
+            .json({
+              message:
+                "Offer Letter upload must be a PDF file.",
+            });
         }
 
         if (!company) {
@@ -1130,11 +2064,12 @@ router.post(
             req.file.path,
           );
 
-          return res.status(400).json({
-            success: false,
-            message:
-              "Company name is required.",
-          });
+          return res
+            .status(400)
+            .json({
+              message:
+                "Company name is required.",
+            });
         }
 
         if (!role) {
@@ -1142,18 +2077,17 @@ router.post(
             req.file.path,
           );
 
-          return res.status(400).json({
-            success: false,
-            message:
-              "Role is required.",
-          });
+          return res
+            .status(400)
+            .json({
+              message:
+                "Role is required.",
+            });
         }
       }
 
       /*
-      ==================================================
-      CREATE REPORT OBJECT
-      ==================================================
+      CREATE REPORT
       */
 
       const newReport = {
@@ -1161,19 +2095,25 @@ router.post(
           new ObjectId().toString(),
 
         date:
-          getTodayDate(),
+          new Date()
+            .toISOString()
+            .split("T")[0],
 
         type,
 
         company:
-          type === "Interview Call" ||
-          type === "Offer Letter"
+          type ===
+            "Interview Call" ||
+          type ===
+            "Offer Letter"
             ? company
             : "",
 
         role:
-          type === "Interview Call" ||
-          type === "Offer Letter"
+          type ===
+            "Interview Call" ||
+          type ===
+            "Offer Letter"
             ? role
             : "",
 
@@ -1183,17 +2123,20 @@ router.post(
             : "",
 
         fileName:
-          req.file.originalname,
+          req.file
+            .originalname,
 
         fileUrl:
           `/uploads/${req.file.filename}`,
 
         fileType:
-          req.file.mimetype,
+          req.file
+            .mimetype,
 
         uploadedBy:
           String(
-            req.body.uploadedBy ||
+            req.body
+              .uploadedBy ||
               "",
           ).trim(),
 
@@ -1201,14 +2144,10 @@ router.post(
           new Date(),
       };
 
-      /*
-      ==================================================
-      SAVE TO MONGODB
-      ==================================================
-      */
-
       await db
-        .collection("candidates")
+        .collection(
+          "candidates",
+        )
         .updateOne(
           query,
           {
@@ -1224,16 +2163,13 @@ router.post(
           },
         );
 
-      return res.status(201).json({
-        success: true,
+      return res
+        .status(201)
+        .json({
+          success: true,
 
-        message:
-          type === "Offer Letter"
-            ? "Offer Letter uploaded successfully."
-            : "File uploaded successfully.",
-
-        data: newReport,
-      });
+          data: newReport,
+        });
     } catch (error) {
       console.error(
         "Error uploading report:",
@@ -1244,148 +2180,19 @@ router.post(
         req.file?.path,
       );
 
-      return res.status(500).json({
-        success: false,
-        message:
-          error?.message ||
-          "Failed to upload file.",
-      });
+      return res
+        .status(500)
+        .json({
+          message:
+            "Failed to upload file.",
+        });
     }
   },
 );
 
 /*
 |--------------------------------------------------------------------------
-| DELETE REPORT / OFFER LETTER
-|--------------------------------------------------------------------------
-| DELETE /api/candidates/:candidateId/reports/:reportId
-|--------------------------------------------------------------------------
-*/
-
-router.delete(
-  "/:candidateId/reports/:reportId",
-  async (req, res) => {
-    try {
-      const db =
-        getDatabase();
-
-      const {
-        candidate,
-        query,
-      } =
-        await findCandidate(
-          db,
-          req.params.candidateId,
-        );
-
-      if (!candidate) {
-        return res.status(404).json({
-          success: false,
-          message:
-            "Candidate not found.",
-        });
-      }
-
-      const reportId =
-        String(
-          req.params.reportId,
-        );
-
-      const reports =
-        Array.isArray(
-          candidate.uploadedReports,
-        )
-          ? candidate.uploadedReports
-          : [];
-
-      const report =
-        reports.find(
-          (item) =>
-            String(
-              item?.id || "",
-            ) === reportId,
-        );
-
-      if (!report) {
-        return res.status(404).json({
-          success: false,
-          message:
-            "Report not found.",
-        });
-      }
-
-      if (
-        report.fileUrl
-      ) {
-        const fileName =
-          path.basename(
-            String(
-              report.fileUrl,
-            ),
-          );
-
-        deleteUploadedFile(
-          path.join(
-            uploadsDirectory,
-            fileName,
-          ),
-        );
-      }
-
-      const updatedReports =
-        reports.filter(
-          (item) =>
-            String(
-              item?.id || "",
-            ) !== reportId,
-        );
-
-      await db
-        .collection("candidates")
-        .updateOne(
-          query,
-          {
-            $set: {
-              uploadedReports:
-                updatedReports,
-
-              updatedAt:
-                new Date(),
-            },
-          },
-        );
-
-      return res.json({
-        success: true,
-
-        message:
-          report.type ===
-          "Offer Letter"
-            ? "Offer Letter deleted successfully."
-            : "Report deleted successfully.",
-
-        data: report,
-      });
-    } catch (error) {
-      console.error(
-        "Error deleting report:",
-        error,
-      );
-
-      return res.status(500).json({
-        success: false,
-        message:
-          "Failed to delete report.",
-      });
-    }
-  },
-);
-
-/*
-|--------------------------------------------------------------------------
-| GET MAR REPORTS
-|--------------------------------------------------------------------------
-| GET /api/candidates/:candidateId/mar
+| GET DAILY MAR REPORTS
 |--------------------------------------------------------------------------
 */
 
@@ -1401,20 +2208,20 @@ router.get(
       } =
         await findCandidate(
           db,
-          req.params.candidateId,
+          req.params
+            .candidateId,
         );
 
       if (!candidate) {
-        return res.status(404).json({
-          success: false,
-          message:
-            "Candidate not found.",
-        });
+        return res
+          .status(404)
+          .json({
+            message:
+              "Candidate not found.",
+          });
       }
 
       return res.json({
-        success: true,
-
         data:
           Array.isArray(
             candidate.uploadedMARReports,
@@ -1428,20 +2235,19 @@ router.get(
         error,
       );
 
-      return res.status(500).json({
-        success: false,
-        message:
-          "Failed to fetch MAR reports.",
-      });
+      return res
+        .status(500)
+        .json({
+          message:
+            "Failed to fetch MAR reports.",
+        });
     }
   },
 );
 
 /*
 |--------------------------------------------------------------------------
-| UPLOAD MAR
-|--------------------------------------------------------------------------
-| POST /api/candidates/:candidateId/mar
+| UPLOAD DAILY MAR REPORT
 |--------------------------------------------------------------------------
 */
 
@@ -1459,7 +2265,8 @@ router.post(
       } =
         await findCandidate(
           db,
-          req.params.candidateId,
+          req.params
+            .candidateId,
         );
 
       if (!candidate) {
@@ -1467,70 +2274,85 @@ router.post(
           req.file?.path,
         );
 
-        return res.status(404).json({
-          success: false,
-          message:
-            "Candidate not found.",
-        });
+        return res
+          .status(404)
+          .json({
+            message:
+              "Candidate not found.",
+          });
       }
 
       if (!req.file) {
-        return res.status(400).json({
-          success: false,
-          message:
-            "Please select a MAR file.",
-        });
+        return res
+          .status(400)
+          .json({
+            message:
+              "Please select a MAR file.",
+          });
       }
 
-      const isAllowed =
-        req.file.mimetype ===
-          "application/pdf" ||
-        req.file.mimetype ===
-          "text/plain" ||
-        String(
-          req.file.originalname ||
-            "",
-        )
-          .toLowerCase()
-          .endsWith(".pdf") ||
-        String(
-          req.file.originalname ||
-            "",
-        )
-          .toLowerCase()
-          .endsWith(".txt");
+      const extension =
+        path
+          .extname(
+            req.file
+              .originalname,
+          )
+          .toLowerCase();
 
-      if (!isAllowed) {
+      const allowedExtensions =
+        [
+          ".txt",
+          ".pdf",
+        ];
+
+      if (
+        !allowedExtensions.includes(
+          extension,
+        )
+      ) {
         deleteUploadedFile(
           req.file.path,
         );
 
-        return res.status(400).json({
-          success: false,
-          message:
-            "MAR file must be PDF or TXT.",
-        });
+        return res
+          .status(400)
+          .json({
+            message:
+              "Daily MAR Report must be a .txt or PDF file.",
+          });
       }
 
-      const report = {
+      const fileFormat =
+        extension === ".pdf"
+          ? "PDF"
+          : "TXT";
+
+      const newMARReport = {
         id:
           new ObjectId().toString(),
 
         date:
-          getTodayDate(),
+          new Date()
+            .toISOString()
+            .split("T")[0],
 
         fileName:
-          req.file.originalname,
+          req.file
+            .originalname,
 
         fileUrl:
           `/uploads/${req.file.filename}`,
 
         fileType:
-          req.file.mimetype,
+          req.file
+            .mimetype,
 
-        uploadedBy:
+        fileFormat,
+
+        updatedBy:
           String(
-            req.body.uploadedBy ||
+            req.body
+              .updatedBy ||
               "",
           ).trim(),
 
@@ -1539,13 +2361,15 @@ router.post(
       };
 
       await db
-        .collection("candidates")
+        .collection(
+          "candidates",
+        )
         .updateOne(
           query,
           {
             $push: {
               uploadedMARReports:
-                report,
+                newMARReport,
             },
 
             $set: {
@@ -1555,15 +2379,17 @@ router.post(
           },
         );
 
-      return res.status(201).json({
-        success: true,
-        message:
-          "MAR uploaded successfully.",
-        data: report,
-      });
+      return res
+        .status(201)
+        .json({
+          success: true,
+
+          data:
+            newMARReport,
+        });
     } catch (error) {
       console.error(
-        "Error uploading MAR:",
+        "Error uploading MAR report:",
         error,
       );
 
@@ -1571,416 +2397,12 @@ router.post(
         req.file?.path,
       );
 
-      return res.status(500).json({
-        success: false,
-        message:
-          "Failed to upload MAR.",
-      });
-    }
-  },
-);
-
-/*
-|--------------------------------------------------------------------------
-| DELETE MAR
-|--------------------------------------------------------------------------
-| DELETE /api/candidates/:candidateId/mar/:reportId
-|--------------------------------------------------------------------------
-*/
-
-router.delete(
-  "/:candidateId/mar/:reportId",
-  async (req, res) => {
-    try {
-      const db =
-        getDatabase();
-
-      const {
-        candidate,
-        query,
-      } =
-        await findCandidate(
-          db,
-          req.params.candidateId,
-        );
-
-      if (!candidate) {
-        return res.status(404).json({
-          success: false,
+      return res
+        .status(500)
+        .json({
           message:
-            "Candidate not found.",
+            "Failed to upload MAR report.",
         });
-      }
-
-      const reports =
-        Array.isArray(
-          candidate.uploadedMARReports,
-        )
-          ? candidate.uploadedMARReports
-          : [];
-
-      const report =
-        reports.find(
-          (item) =>
-            String(
-              item?.id || "",
-            ) ===
-            String(
-              req.params.reportId,
-            ),
-        );
-
-      if (!report) {
-        return res.status(404).json({
-          success: false,
-          message:
-            "MAR report not found.",
-        });
-      }
-
-      if (
-        report.fileUrl
-      ) {
-        const fileName =
-          path.basename(
-            String(
-              report.fileUrl,
-            ),
-          );
-
-        deleteUploadedFile(
-          path.join(
-            uploadsDirectory,
-            fileName,
-          ),
-        );
-      }
-
-      const updated =
-        reports.filter(
-          (item) =>
-            String(
-              item?.id || "",
-            ) !==
-            String(
-              req.params.reportId,
-            ),
-        );
-
-      await db
-        .collection("candidates")
-        .updateOne(
-          query,
-          {
-            $set: {
-              uploadedMARReports:
-                updated,
-
-              updatedAt:
-                new Date(),
-            },
-          },
-        );
-
-      return res.json({
-        success: true,
-        message:
-          "MAR report deleted successfully.",
-      });
-    } catch (error) {
-      console.error(
-        "Error deleting MAR:",
-        error,
-      );
-
-      return res.status(500).json({
-        success: false,
-        message:
-          "Failed to delete MAR report.",
-      });
-    }
-  },
-);
-
-/*
-|--------------------------------------------------------------------------
-| GET PROGRAM ACTIVITIES
-|--------------------------------------------------------------------------
-| GET /api/candidates/:candidateId/program-activities
-|--------------------------------------------------------------------------
-*/
-
-router.get(
-  "/:candidateId/program-activities",
-  async (req, res) => {
-    try {
-      const db =
-        getDatabase();
-
-      const {
-        candidate,
-      } =
-        await findCandidate(
-          db,
-          req.params.candidateId,
-        );
-
-      if (!candidate) {
-        return res.status(404).json({
-          success: false,
-          message:
-            "Candidate not found.",
-        });
-      }
-
-      return res.json({
-        success: true,
-
-        data:
-          Array.isArray(
-            candidate.programActivities,
-          )
-            ? candidate.programActivities
-            : [],
-      });
-    } catch (error) {
-      console.error(
-        "Error fetching program activities:",
-        error,
-      );
-
-      return res.status(500).json({
-        success: false,
-        message:
-          "Failed to fetch program activities.",
-      });
-    }
-  },
-);
-
-/*
-|--------------------------------------------------------------------------
-| CREATE PROGRAM ACTIVITY
-|--------------------------------------------------------------------------
-| POST /api/candidates/:candidateId/program-activities
-|--------------------------------------------------------------------------
-*/
-
-router.post(
-  "/:candidateId/program-activities",
-  async (req, res) => {
-    try {
-      const db =
-        getDatabase();
-
-      const {
-        candidate,
-        query,
-      } =
-        await findCandidate(
-          db,
-          req.params.candidateId,
-        );
-
-      if (!candidate) {
-        return res.status(404).json({
-          success: false,
-          message:
-            "Candidate not found.",
-        });
-      }
-
-      const body =
-        req.body || {};
-
-      const activity = {
-        id:
-          new ObjectId().toString(),
-
-        date:
-          String(
-            body.date ||
-              getTodayDate(),
-          ).trim(),
-
-        activityType:
-          String(
-            body.activityType ||
-              "Other",
-          ).trim(),
-
-        conductedBy:
-          String(
-            body.conductedBy ||
-              "",
-          ).trim(),
-
-        subject:
-          String(
-            body.subject || "",
-          ).trim(),
-
-        notes:
-          String(
-            body.notes || "",
-          ).trim(),
-
-        nextSteps:
-          String(
-            body.nextSteps || "",
-          ).trim(),
-
-        createdAt:
-          new Date(),
-
-        updatedAt:
-          new Date(),
-      };
-
-      await db
-        .collection("candidates")
-        .updateOne(
-          query,
-          {
-            $push: {
-              programActivities:
-                {
-                  $each: [
-                    activity,
-                  ],
-                  $position: 0,
-                },
-            },
-
-            $set: {
-              updatedAt:
-                new Date(),
-            },
-          },
-        );
-
-      return res.status(201).json({
-        success: true,
-
-        message:
-          "Program activity saved successfully.",
-
-        data: activity,
-      });
-    } catch (error) {
-      console.error(
-        "Error creating program activity:",
-        error,
-      );
-
-      return res.status(500).json({
-        success: false,
-        message:
-          "Failed to save program activity.",
-      });
-    }
-  },
-);
-
-/*
-|--------------------------------------------------------------------------
-| DELETE PROGRAM ACTIVITY
-|--------------------------------------------------------------------------
-| DELETE /api/candidates/:candidateId/program-activities/:activityId
-|--------------------------------------------------------------------------
-*/
-
-router.delete(
-  "/:candidateId/program-activities/:activityId",
-  async (req, res) => {
-    try {
-      const db =
-        getDatabase();
-
-      const {
-        candidate,
-        query,
-      } =
-        await findCandidate(
-          db,
-          req.params.candidateId,
-        );
-
-      if (!candidate) {
-        return res.status(404).json({
-          success: false,
-          message:
-            "Candidate not found.",
-        });
-      }
-
-      const activities =
-        Array.isArray(
-          candidate.programActivities,
-        )
-          ? candidate.programActivities
-          : [];
-
-      const activityId =
-        String(
-          req.params.activityId,
-        );
-
-      const exists =
-        activities.some(
-          (item) =>
-            String(
-              item?.id || "",
-            ) === activityId,
-        );
-
-      if (!exists) {
-        return res.status(404).json({
-          success: false,
-          message:
-            "Program activity not found.",
-        });
-      }
-
-      const updated =
-        activities.filter(
-          (item) =>
-            String(
-              item?.id || "",
-            ) !== activityId,
-        );
-
-      await db
-        .collection("candidates")
-        .updateOne(
-          query,
-          {
-            $set: {
-              programActivities:
-                updated,
-
-              updatedAt:
-                new Date(),
-            },
-          },
-        );
-
-      return res.json({
-        success: true,
-        message:
-          "Program activity deleted successfully.",
-      });
-    } catch (error) {
-      console.error(
-        "Error deleting program activity:",
-        error,
-      );
-
-      return res.status(500).json({
-        success: false,
-        message:
-          "Failed to delete program activity.",
-      });
     }
   },
 );
@@ -1988,8 +2410,6 @@ router.delete(
 /*
 |--------------------------------------------------------------------------
 | GET CANDIDATE ACTIVITY
-|--------------------------------------------------------------------------
-| GET /api/candidates/:candidateId/activity
 |--------------------------------------------------------------------------
 */
 
@@ -2005,20 +2425,20 @@ router.get(
       } =
         await findCandidate(
           db,
-          req.params.candidateId,
+          req.params
+            .candidateId,
         );
 
       if (!candidate) {
-        return res.status(404).json({
-          success: false,
-          message:
-            "Candidate not found.",
-        });
+        return res
+          .status(404)
+          .json({
+            message:
+              "Candidate not found.",
+          });
       }
 
       return res.json({
-        success: true,
-
         data:
           Array.isArray(
             candidate.activity,
@@ -2032,104 +2452,105 @@ router.get(
         error,
       );
 
-      return res.status(500).json({
-        success: false,
-        message:
-          "Failed to fetch activity.",
-      });
+      return res
+        .status(500)
+        .json({
+          message:
+            "Failed to fetch activity.",
+        });
     }
   },
 );
 
 /*
 |--------------------------------------------------------------------------
-| ADD ACTIVITY
-|--------------------------------------------------------------------------
-| POST /api/candidates/:candidateId/activity
+| UPDATE CANDIDATE STATUS
 |--------------------------------------------------------------------------
 */
 
-router.post(
-  "/:candidateId/activity",
+router.patch(
+  "/:candidateId/status",
   async (req, res) => {
     try {
       const db =
         getDatabase();
 
       const {
-        candidate,
-        query,
-      } =
-        await findCandidate(
-          db,
-          req.params.candidateId,
-        );
+        status,
+      } = req.body || {};
 
-      if (!candidate) {
-        return res.status(404).json({
-          success: false,
-          message:
-            "Candidate not found.",
-        });
+      const allowedStatuses =
+        [
+          "Active",
+          "Completed",
+          "Expiring Soon",
+          "Paused",
+        ];
+
+      if (
+        !allowedStatuses.includes(
+          status,
+        )
+      ) {
+        return res
+          .status(400)
+          .json({
+            message:
+              "Invalid candidate status.",
+          });
       }
 
-      const activity = {
-        id:
-          new ObjectId().toString(),
-
-        text:
-          String(
-            req.body?.text ||
-              "",
-          ).trim(),
-
-        date:
-          String(
-            req.body?.date ||
-              getTodayDate(),
-          ).trim(),
-
-        createdAt:
-          new Date(),
-      };
-
-      await db
-        .collection("candidates")
-        .updateOne(
-          query,
-          {
-            $push: {
-              activity:
-                {
-                  $each: [
-                    activity,
-                  ],
-                  $position: 0,
-                },
-            },
-
-            $set: {
-              updatedAt:
-                new Date(),
-            },
-          },
+      const query =
+        getCandidateQuery(
+          req.params
+            .candidateId,
         );
 
-      return res.status(201).json({
-        success: true,
-        data: activity,
-      });
+      const result =
+        await db
+          .collection(
+            "candidates",
+          )
+          .findOneAndUpdate(
+            query,
+            {
+              $set: {
+                status,
+
+                updatedAt:
+                  new Date(),
+              },
+            },
+            {
+              returnDocument:
+                "after",
+            },
+          );
+
+      if (!result) {
+        return res
+          .status(404)
+          .json({
+            message:
+              "Candidate not found.",
+          });
+      }
+
+      return res.json(
+        result,
+      );
     } catch (error) {
       console.error(
-        "Error creating activity:",
+        "Error updating status:",
         error,
       );
 
-      return res.status(500).json({
-        success: false,
-        message:
-          "Failed to create activity.",
-      });
+      return res
+        .status(500)
+        .json({
+          message:
+            "Failed to update candidate status.",
+        });
     }
   },
 );
@@ -2137,8 +2558,6 @@ router.post(
 /*
 |--------------------------------------------------------------------------
 | GET APPLICATION HISTORY
-|--------------------------------------------------------------------------
-| GET /api/candidates/:candidateId/applications
 |--------------------------------------------------------------------------
 */
 
@@ -2154,18 +2573,22 @@ router.get(
       } =
         await findCandidate(
           db,
-          req.params.candidateId,
+          req.params
+            .candidateId,
         );
 
       if (!candidate) {
-        return res.status(404).json({
-          success: false,
-          message:
-            "Candidate not found.",
-        });
+        return res
+          .status(404)
+          .json({
+            success: false,
+
+            message:
+              "Candidate not found.",
+          });
       }
 
-      const history =
+      const applicationHistory =
         Array.isArray(
           candidate.applicationHistory,
         )
@@ -2174,13 +2597,16 @@ router.get(
             ]
           : [];
 
-      history.sort(
-        (a, b) =>
+      applicationHistory.sort(
+        (
+          first,
+          second,
+        ) =>
           new Date(
-            b.date || 0,
+            second.date,
           ).getTime() -
           new Date(
-            a.date || 0,
+            first.date,
           ).getTime(),
       );
 
@@ -2209,34 +2635,37 @@ router.get(
           ? Number(
               candidate.creditsUsed,
             )
-          : Math.max(
-              creditsTotal -
-                creditsRemaining,
-              0,
-            );
+          : creditsTotal -
+            creditsRemaining;
 
-      return res.json({
-        success: true,
+      return res
+        .status(200)
+        .json({
+          success: true,
 
-        data: history,
+          data:
+            applicationHistory,
 
-        creditsTotal,
+          creditsTotal,
 
-        creditsUsed,
+          creditsUsed,
 
-        creditsRemaining,
-      });
+          creditsRemaining,
+        });
     } catch (error) {
       console.error(
-        "Error fetching applications:",
+        "Error getting application history:",
         error,
       );
 
-      return res.status(500).json({
-        success: false,
-        message:
-          "Failed to load application history.",
-      });
+      return res
+        .status(500)
+        .json({
+          success: false,
+
+          message:
+            "Failed to load application history.",
+        });
     }
   },
 );
@@ -2244,8 +2673,6 @@ router.get(
 /*
 |--------------------------------------------------------------------------
 | ADD APPLICATIONS
-|--------------------------------------------------------------------------
-| POST /api/candidates/:candidateId/applications
 |--------------------------------------------------------------------------
 */
 
@@ -2256,22 +2683,34 @@ router.post(
       const db =
         getDatabase();
 
+      const {
+        applications,
+        date,
+        updatedBy,
+      } = req.body || {};
+
       const applicationCount =
         Number(
-          req.body?.applications,
+          applications,
         );
 
       if (
-        !Number.isInteger(
+        !Number.isFinite(
           applicationCount,
         ) ||
-        applicationCount <= 0
+        applicationCount <= 0 ||
+        !Number.isInteger(
+          applicationCount,
+        )
       ) {
-        return res.status(400).json({
-          success: false,
-          message:
-            "Applications must be a whole number greater than 0.",
-        });
+        return res
+          .status(400)
+          .json({
+            success: false,
+
+            message:
+              "Applications must be a whole number greater than 0.",
+          });
       }
 
       const {
@@ -2280,15 +2719,19 @@ router.post(
       } =
         await findCandidate(
           db,
-          req.params.candidateId,
+          req.params
+            .candidateId,
         );
 
       if (!candidate) {
-        return res.status(404).json({
-          success: false,
-          message:
-            "Candidate not found.",
-        });
+        return res
+          .status(404)
+          .json({
+            success: false,
+
+            message:
+              "Candidate not found.",
+          });
       }
 
       const creditsTotal =
@@ -2296,29 +2739,7 @@ router.post(
           candidate.creditsTotal,
         ) || 0;
 
-      const creditsRemaining =
-        Number.isFinite(
-          Number(
-            candidate.creditsRemaining,
-          ),
-        )
-          ? Number(
-              candidate.creditsRemaining,
-            )
-          : creditsTotal;
-
-      if (
-        applicationCount >
-        creditsRemaining
-      ) {
-        return res.status(400).json({
-          success: false,
-          message:
-            "Not enough credits remaining.",
-        });
-      }
-
-      const history =
+      const applicationHistory =
         Array.isArray(
           candidate.applicationHistory,
         )
@@ -2327,121 +2748,137 @@ router.post(
             ]
           : [];
 
-      const entry = {
+      const previousApplicationsUsed =
+        applicationHistory.reduce(
+          (
+            total,
+            item,
+          ) =>
+            total +
+            (
+              Number(
+                item.applications,
+              ) || 0
+            ),
+          0,
+        );
+
+      const storedCreditsRemaining =
+        Number(
+          candidate.creditsRemaining,
+        );
+
+      const currentCreditsRemaining =
+        Number.isFinite(
+          storedCreditsRemaining,
+        )
+          ? storedCreditsRemaining
+          : Math.max(
+              creditsTotal -
+                previousApplicationsUsed,
+              0,
+            );
+
+      if (
+        applicationCount >
+        currentCreditsRemaining
+      ) {
+        return res
+          .status(400)
+          .json({
+            success: false,
+
+            message:
+              `Only ${currentCreditsRemaining} application credits are remaining.`,
+          });
+      }
+
+      const applicationDate =
+        typeof date ===
+          "string" &&
+        /^\d{4}-\d{2}-\d{2}$/.test(
+          date,
+        )
+          ? date
+          : getTodayDate();
+
+      /*
+      CREATE HISTORY ENTRY
+      */
+
+      const savedEntry = {
         id:
-          new ObjectId().toString(),
+          generateApplicationId(),
 
         date:
-          String(
-            req.body?.date ||
-              getTodayDate(),
-          ),
+          applicationDate,
 
         applications:
           applicationCount,
 
         updatedBy:
           String(
-            req.body?.updatedBy ||
-              "",
+            updatedBy ||
+              candidate.owner ||
+              candidate.assignedSpecialist ||
+              "Unassigned",
           ).trim(),
 
         createdAt:
           new Date(),
+
+        updatedAt:
+          new Date(),
       };
 
-      history.push(entry);
+      /*
+      DO NOT MERGE SAME-DAY ENTRIES
+      */
 
-      const newRemaining =
-        creditsRemaining -
-        applicationCount;
-
-      const newUsed =
-        creditsTotal -
-        newRemaining;
-
-      await db
-        .collection("candidates")
-        .updateOne(
-          query,
-          {
-            $set: {
-              applicationHistory:
-                history,
-
-              creditsRemaining:
-                newRemaining,
-
-              creditsUsed:
-                newUsed,
-
-              updatedAt:
-                new Date(),
-            },
-          },
-        );
-
-      return res.status(201).json({
-        success: true,
-
-        data: entry,
-
-        creditsTotal,
-
-        creditsUsed:
-          newUsed,
-
-        creditsRemaining:
-          newRemaining,
-      });
-    } catch (error) {
-      console.error(
-        "Error saving applications:",
-        error,
+      applicationHistory.push(
+        savedEntry,
       );
 
-      return res.status(500).json({
-        success: false,
-        message:
-          "Failed to save applications.",
-      });
-    }
-  },
-);
+      /*
+      RECALCULATE USED CREDITS
+      */
 
-/*
-|--------------------------------------------------------------------------
-| PATCH STATUS
-|--------------------------------------------------------------------------
-| PATCH /api/candidates/:candidateId/status
-|--------------------------------------------------------------------------
-*/
-
-router.patch(
-  "/:candidateId/status",
-  async (req, res) => {
-    try {
-      const db =
-        getDatabase();
-
-      const status =
-        String(
-          req.body?.status ||
-            "",
-        ).trim();
-
-      if (!status) {
-        return res.status(400).json({
-          success: false,
-          message:
-            "Status is required.",
-        });
-      }
-
-      const query =
-        getCandidateQuery(
-          req.params.candidateId,
+      const creditsUsed =
+        applicationHistory.reduce(
+          (
+            total,
+            item,
+          ) =>
+            total +
+            (
+              Number(
+                item.applications,
+              ) || 0
+            ),
+          0,
         );
+
+      const creditsRemaining =
+        Math.max(
+          creditsTotal -
+            creditsUsed,
+          0,
+        );
+
+      /*
+      RECALCULATE PROGRAM DAYS
+      */
+
+      const daysRemaining =
+        calculateDaysRemaining({
+          ...candidate,
+
+          applicationHistory,
+        });
+
+      /*
+      UPDATE DATABASE
+      */
 
       const result =
         await db
@@ -2452,7 +2889,13 @@ router.patch(
             query,
             {
               $set: {
-                status,
+                applicationHistory,
+
+                creditsUsed,
+
+                creditsRemaining,
+
+                daysRemaining,
 
                 updatedAt:
                   new Date(),
@@ -2465,28 +2908,49 @@ router.patch(
           );
 
       if (!result) {
-        return res.status(404).json({
-          success: false,
-          message:
-            "Candidate not found.",
-        });
+        return res
+          .status(404)
+          .json({
+            success: false,
+
+            message:
+              "Candidate not found.",
+          });
       }
 
-      return res.json({
-        success: true,
-        data: result,
-      });
+      return res
+        .status(201)
+        .json({
+          success: true,
+
+          message:
+            "Applications updated successfully.",
+
+          data:
+            savedEntry,
+
+          creditsTotal,
+
+          creditsUsed,
+
+          creditsRemaining,
+
+          daysRemaining,
+        });
     } catch (error) {
       console.error(
-        "Error updating status:",
+        "Error saving applications:",
         error,
       );
 
-      return res.status(500).json({
-        success: false,
-        message:
-          "Failed to update status.",
-      });
+      return res
+        .status(500)
+        .json({
+          success: false,
+
+          message:
+            "Failed to save applications.",
+        });
     }
   },
 );
@@ -2494,8 +2958,6 @@ router.patch(
 /*
 |--------------------------------------------------------------------------
 | GET SINGLE CANDIDATE
-|--------------------------------------------------------------------------
-| GET /api/candidates/:candidateId
 |--------------------------------------------------------------------------
 */
 
@@ -2511,46 +2973,51 @@ router.get(
       } =
         await findCandidate(
           db,
-          req.params.candidateId,
+          req.params
+            .candidateId,
         );
 
       if (!candidate) {
-        return res.status(404).json({
-          success: false,
-          message:
-            "Candidate not found.",
-        });
+        return res
+          .status(404)
+          .json({
+            message:
+              "Candidate not found.",
+          });
       }
 
-      return res.json({
-        ...candidate,
+      const candidateWithDays =
+        {
+          ...candidate,
 
-        daysRemaining:
-          calculateDaysRemaining(
-            candidate,
-          ),
-      });
+          daysRemaining:
+            calculateDaysRemaining(
+              candidate,
+            ),
+        };
+
+      return res.json(
+        candidateWithDays,
+      );
     } catch (error) {
       console.error(
         "Error fetching candidate:",
         error,
       );
 
-      return res.status(500).json({
-        success: false,
-        message:
-          "Failed to fetch candidate.",
-      });
+      return res
+        .status(500)
+        .json({
+          message:
+            "Failed to fetch candidate.",
+        });
     }
   },
 );
 
 /*
 |--------------------------------------------------------------------------
-| UPDATE CANDIDATE
-|--------------------------------------------------------------------------
-| PUT /api/candidates/:candidateId
-| PATCH /api/candidates/:candidateId
+| UPDATE CANDIDATE HANDLER
 |--------------------------------------------------------------------------
 */
 
@@ -2564,32 +3031,47 @@ async function updateCandidateHandler(
 
     const query =
       getCandidateQuery(
-        req.params.candidateId,
+        req.params
+          .candidateId,
       );
 
-    const existing =
+    const existingCandidate =
       await db
         .collection(
           "candidates",
         )
-        .findOne(query);
+        .findOne(
+          query,
+        );
 
-    if (!existing) {
-      return res.status(404).json({
-        success: false,
-        message:
-          "Candidate not found.",
-      });
+    if (!existingCandidate) {
+      return res
+        .status(404)
+        .json({
+          success: false,
+
+          message:
+            "Candidate not found.",
+        });
     }
 
     const updates = {
-      ...(req.body || {}),
+      ...req.body,
+
       updatedAt:
         new Date(),
     };
 
+    /*
+    NEVER allow ID changes.
+    */
+
     delete updates._id;
     delete updates.id;
+
+    /*
+    NORMALIZE EMAIL
+    */
 
     if (
       updates.email !==
@@ -2603,6 +3085,10 @@ async function updateCandidateHandler(
           .toLowerCase();
     }
 
+    /*
+    PLAN CHANGE
+    */
+
     if (
       updates.plan !==
       undefined
@@ -2615,11 +3101,18 @@ async function updateCandidateHandler(
           updates.plan,
         );
 
-      updates.plan = plan;
+      updates.plan =
+        plan;
+
+      /*
+      Only reset credits if
+      the plan actually changes.
+      */
 
       if (
         String(
-          existing.plan || "",
+          existingCandidate.plan ||
+            "",
         ) !== plan
       ) {
         updates.creditsTotal =
@@ -2633,8 +3126,18 @@ async function updateCandidateHandler(
 
         updates.applicationHistory =
           [];
+
+        updates.daysRemaining =
+          Number(
+            updates.programDays ??
+              existingCandidate.programDays,
+          ) || 0;
       }
     }
+
+    /*
+    PROGRAM DAYS UPDATE
+    */
 
     if (
       updates.programDays !==
@@ -2647,17 +3150,19 @@ async function updateCandidateHandler(
           ) || 0,
           0,
         );
+
+      const candidateWithUpdatedProgramDays =
+        {
+          ...existingCandidate,
+
+          ...updates,
+        };
+
+      updates.daysRemaining =
+        calculateDaysRemaining(
+          candidateWithUpdatedProgramDays,
+        );
     }
-
-    const candidateForDays = {
-      ...existing,
-      ...updates,
-    };
-
-    updates.daysRemaining =
-      calculateDaysRemaining(
-        candidateForDays,
-      );
 
     const result =
       await db
@@ -2667,7 +3172,8 @@ async function updateCandidateHandler(
         .findOneAndUpdate(
           query,
           {
-            $set: updates,
+            $set:
+              updates,
           },
           {
             returnDocument:
@@ -2675,14 +3181,27 @@ async function updateCandidateHandler(
           },
         );
 
-    return res.json({
-      success: true,
+    if (!result) {
+      return res
+        .status(404)
+        .json({
+          success: false,
 
-      message:
-        "Candidate updated successfully.",
+          message:
+            "Candidate not found.",
+        });
+    }
 
-      data: result,
-    });
+    return res
+      .status(200)
+      .json({
+        success: true,
+
+        message:
+          "Candidate updated successfully.",
+
+        data: result,
+      });
   } catch (error) {
     console.error(
       "Error updating candidate:",
@@ -2690,27 +3209,46 @@ async function updateCandidateHandler(
     );
 
     if (
-      error?.code === 11000
+      error?.code ===
+      11000
     ) {
-      return res.status(400).json({
-        success: false,
-        message:
-          "A candidate with this email already exists.",
-      });
+      return res
+        .status(400)
+        .json({
+          success: false,
+
+          message:
+            "A candidate with this email already exists.",
+        });
     }
 
-    return res.status(500).json({
-      success: false,
-      message:
-        "Failed to update candidate.",
-    });
+    return res
+      .status(500)
+      .json({
+        success: false,
+
+        message:
+          "Failed to update candidate.",
+      });
   }
 }
+
+/*
+|--------------------------------------------------------------------------
+| PUT UPDATE
+|--------------------------------------------------------------------------
+*/
 
 router.put(
   "/:candidateId",
   updateCandidateHandler,
 );
+
+/*
+|--------------------------------------------------------------------------
+| PATCH UPDATE
+|--------------------------------------------------------------------------
+*/
 
 router.patch(
   "/:candidateId",
@@ -2720,8 +3258,6 @@ router.patch(
 /*
 |--------------------------------------------------------------------------
 | DELETE CANDIDATE
-|--------------------------------------------------------------------------
-| DELETE /api/candidates/:candidateId
 |--------------------------------------------------------------------------
 */
 
@@ -2734,25 +3270,36 @@ router.delete(
 
       const query =
         getCandidateQuery(
-          req.params.candidateId,
+          req.params
+            .candidateId,
         );
+
+      console.log(
+        "Deleting candidate with query:",
+        query,
+      );
 
       const result =
         await db
           .collection(
             "candidates",
           )
-          .deleteOne(query);
+          .deleteOne(
+            query,
+          );
 
       if (
         result.deletedCount ===
         0
       ) {
-        return res.status(404).json({
-          success: false,
-          message:
-            "Candidate not found.",
-        });
+        return res
+          .status(404)
+          .json({
+            success: false,
+
+            message:
+              "Candidate not found.",
+          });
       }
 
       return res.json({
@@ -2770,11 +3317,14 @@ router.delete(
         error,
       );
 
-      return res.status(500).json({
-        success: false,
-        message:
-          "Failed to delete candidate.",
-      });
+      return res
+        .status(500)
+        .json({
+          success: false,
+
+          message:
+            "Failed to delete candidate.",
+        });
     }
   },
 );
@@ -2796,15 +3346,15 @@ router.use(
       error instanceof
       multer.MulterError
     ) {
-      return res.status(400).json({
-        success: false,
-
-        message:
-          error.code ===
-          "LIMIT_FILE_SIZE"
-            ? "File is too large. Maximum allowed size is 20MB."
-            : error.message,
-      });
+      return res
+        .status(400)
+        .json({
+          message:
+            error.code ===
+            "LIMIT_FILE_SIZE"
+              ? "File is too large. Maximum allowed size is 20MB."
+              : error.message,
+        });
     }
 
     return next(error);

@@ -5,6 +5,7 @@ import {
   ArrowRight,
   CheckCircle2,
   Users,
+  PauseCircle,
 } from "lucide-react";
 
 import {
@@ -217,6 +218,11 @@ if (Array.isArray(data)) {
         Number(candidate.daysRemaining ?? 0) < 30,
     ).length;
 
+    const paused = candidates.filter(
+  (candidate) =>
+    candidate.status?.trim().toLowerCase() === "paused",
+).length;
+
     const creditsTotal = candidates.reduce(
       (totalCredits, candidate) =>
         totalCredits +
@@ -236,6 +242,7 @@ if (Array.isArray(data)) {
       active,
       completed,
       expiring,
+      paused,
       creditsTotal,
       creditsRemaining,
     };
@@ -276,6 +283,13 @@ if (Array.isArray(data)) {
       delta: "Under 30 days left",
       tone: "text-warning",
     },
+    {
+  label: "Paused",
+  value: dashboardStats.paused,
+  icon: PauseCircle,
+  delta: "Candidates on hold",
+  tone: "text-destructive",
+},
   ];
 
   /*
@@ -624,7 +638,7 @@ const interviewDomainData = useMemo(() => {
 
       {/* KPI CARDS */}
 
-      <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5">
         {kpis.map((kpi) => {
           const Icon = kpi.icon;
 

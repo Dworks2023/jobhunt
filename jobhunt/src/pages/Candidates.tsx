@@ -615,6 +615,73 @@ async function loadCandidates() {
 
 
 
+  /* ============================================= */
+  /* FORMAT CANDIDATE DATE */
+  /* ============================================= */
+  /*
+   * Candidate dates are stored as YYYY-MM-DD.
+   * Keep the Candidates table consistent with
+   * the Add Candidate date value.
+   */
+  function formatCandidateDate(
+    value?: string | Date | null,
+  ): string {
+    if (!value) {
+      return "-";
+    }
+
+    const raw = String(value).trim();
+
+    if (!raw) {
+      return "-";
+    }
+
+    // Already in the Add Candidate format.
+    const yyyyMmDd = raw.match(
+      /^(\d{4})-(\d{2})-(\d{2})$/,
+    );
+
+    if (yyyyMmDd) {
+      return `${yyyyMmDd[1]}-${yyyyMmDd[2]}-${yyyyMmDd[3]}`;
+    }
+
+    // Handle imported Excel dates that may still arrive
+    // as MM/DD/YYYY.
+    const mmDdYyyy = raw.match(
+      /^(\d{1,2})\/(\d{1,2})\/(\d{4})$/,
+    );
+
+    if (mmDdYyyy) {
+      return `${mmDdYyyy[3]}-${String(
+        Number(mmDdYyyy[1]),
+      ).padStart(2, "0")}-${String(
+        Number(mmDdYyyy[2]),
+      ).padStart(2, "0")}`;
+    }
+
+    // Handle ISO date/time values without changing
+    // the calendar date because of timezone conversion.
+    const isoDate = raw.match(
+      /^(\d{4})-(\d{2})-(\d{2})T/,
+    );
+
+    if (isoDate) {
+      return `${isoDate[1]}-${isoDate[2]}-${isoDate[3]}`;
+    }
+
+    const parsed = new Date(raw);
+
+    if (Number.isNaN(parsed.getTime())) {
+      return raw;
+    }
+
+    return `${parsed.getFullYear()}-${String(
+      parsed.getMonth() + 1,
+    ).padStart(2, "0")}-${String(
+      parsed.getDate(),
+    ).padStart(2, "0")}`;
+  }
+
 /* ============================================= */
 /* CALCULATE PROGRAM END DATE */
 /* ============================================= */
@@ -782,6 +849,31 @@ function getProgramEndDate(
 
 
   /* ============================================= */
+  /* CREATE NEXT CANDIDATE ID */
+  /* ============================================= */
+
+  function getNextCandidateId(
+    candidates: Candidate[],
+  ): string {
+    let highestNumber = 0;
+
+    candidates.forEach((candidate) => {
+      const value = String(candidate.id ?? "").trim();
+      const match = value.match(/^CD_(\d+)$/i);
+
+      if (match) {
+        const number = Number(match[1]);
+
+        if (Number.isFinite(number) && number > highestNumber) {
+          highestNumber = number;
+        }
+      }
+    });
+
+    return `CD_${String(highestNumber + 1).padStart(2, "0")}`;
+  }
+
+  /* ============================================= */
   /* ADD CANDIDATE */
   /* ============================================= */
 
@@ -804,17 +896,71 @@ function getProgramEndDate(
   try {
     setSavingCandidate(true);
 
+    /*
+    PLAN → CREDITS
+    Keep the selected plan and its exact credit value together.
+    This prevents a 100 Applications candidate from being saved
+    with the 250-credit value.
+    */
+    const selectedPlan =
+      plans.find(
+        (item) => item.name === formData.plan,
+      ) ?? plans[0];
+
+    if (!selectedPlan) {
+      throw new Error("No application plan is configured.");
+    }
+
+    /*
+    CANDIDATE ID
+    Use the existing CD_01, CD_02 ... sequence.
+    The ID is sent to the backend so the same ID is stored in MongoDB.
+    */
+    const nextCandidateId = getNextCandidateId(
+      localCandidates,
+    );
+
+    const candidatePayload = {
+      ...formData,
+      id: nextCandidateId,
+      plan: selectedPlan.name,
+      creditsTotal: selectedPlan.credits,
+      creditsRemaining: selectedPlan.credits,
+      creditsUsed: 0,
+    };
+
     const response =
       await createCandidate(
-        formData,
+        candidatePayload as CandidateForm,
       );
 
     // Get the actual candidate object.
     // Supports both:
     // { success: true, data: candidate }
     // and directly returned candidate.
-    const newCandidate =
+    const serverCandidate =
       response?.data ?? response;
+
+    /*
+    Normalize the values displayed immediately after creation.
+    The backend is also fixed to persist these same values.
+    */
+    const newCandidate = {
+      ...serverCandidate,
+      id: nextCandidateId,
+      plan: selectedPlan.name,
+      creditsTotal: selectedPlan.credits,
+      creditsRemaining:
+        Number(serverCandidate?.creditsUsed) || 0
+          ? Math.max(
+              selectedPlan.credits -
+                Number(serverCandidate?.creditsUsed || 0),
+              0,
+            )
+          : selectedPlan.credits,
+      creditsUsed:
+        Number(serverCandidate?.creditsUsed) || 0,
+    };
 
     if (
       !newCandidate ||
@@ -1265,7 +1411,7 @@ assignedSpecialist:
       candidate.domain || "-",
       candidate.plan || "-",
       candidate.experience || "-",
-      candidate.startDate || "-",
+      formatCandidateDate(candidate.startDate),
       getProgramEndDate(
         candidate.startDate,
         candidate.programDays,
@@ -1790,7 +1936,7 @@ assignedSpecialist:
 
                           {/* START DATE */}
 <td className="whitespace-nowrap px-5 py-4 text-muted-foreground">
-  {candidate.startDate || "-"}
+  {formatCandidateDate(candidate.startDate)}
 </td>
 
 {/* END DATE */}

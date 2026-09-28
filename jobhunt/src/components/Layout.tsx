@@ -72,7 +72,7 @@ export default function Layout({
             </span>
 
             <span className="block text-xs text-muted-foreground">
-              Job Hunt Support
+              Jobhunt Program
             </span>
           </span>
         </Link>

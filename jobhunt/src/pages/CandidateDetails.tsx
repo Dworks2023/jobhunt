@@ -246,6 +246,63 @@ function resolveFileUrl(
   return `${API_BASE_URL}/${fileUrl}`;
 }
 
+/*
+|--------------------------------------------------------------------------
+| DATE DISPLAY
+|--------------------------------------------------------------------------
+| Candidate Details uses the same display format as Add Candidate:
+| MM/DD/YYYY
+|
+| The database can keep dates as YYYY-MM-DD or ISO date strings. This helper
+| only changes how the date is displayed; it does not change the stored value.
+|--------------------------------------------------------------------------
+*/
+function formatCandidateDate(value?: string | Date | null): string {
+  if (!value) {
+    return "-";
+  }
+
+  const raw = String(value).trim();
+
+  if (!raw) {
+    return "-";
+  }
+
+  /* Already in MM/DD/YYYY format. */
+  const slashMatch = raw.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+
+  if (slashMatch) {
+    return `${slashMatch[1].padStart(2, "0")}/${slashMatch[2].padStart(2, "0")}/${slashMatch[3]}`;
+  }
+
+  /* YYYY-MM-DD from MongoDB/backend. */
+  const dateOnlyMatch = raw.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+
+  if (dateOnlyMatch) {
+    return `${dateOnlyMatch[2]}/${dateOnlyMatch[3]}/${dateOnlyMatch[1]}`;
+  }
+
+  /* ISO strings such as 2026-09-28T00:00:00.000Z. */
+  const isoDateMatch = raw.match(/^(\d{4})-(\d{2})-(\d{2})T/);
+
+  if (isoDateMatch) {
+    return `${isoDateMatch[2]}/${isoDateMatch[3]}/${isoDateMatch[1]}`;
+  }
+
+  /* Fallback for JavaScript date strings. */
+  const parsed = value instanceof Date ? value : new Date(raw);
+
+  if (Number.isNaN(parsed.getTime())) {
+    return raw;
+  }
+
+  const month = String(parsed.getMonth() + 1).padStart(2, "0");
+  const day = String(parsed.getDate()).padStart(2, "0");
+  const year = parsed.getFullYear();
+
+  return `${month}/${day}/${year}`;
+}
+
 function getProgramEndDate(
   startDate?: string,
   programDays?: number,
@@ -254,25 +311,39 @@ function getProgramEndDate(
     return "-";
   }
 
-  const [year, month, day] = startDate
-    .slice(0, 10)
-    .split("-")
-    .map(Number);
+  const rawStartDate = String(startDate).trim();
+  let start: Date;
 
-  if (!year || !month || !day) {
+  const dateOnlyMatch = rawStartDate.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+
+  if (dateOnlyMatch) {
+    start = new Date(
+      Number(dateOnlyMatch[1]),
+      Number(dateOnlyMatch[2]) - 1,
+      Number(dateOnlyMatch[3]),
+    );
+  } else {
+    const slashMatch = rawStartDate.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+
+    if (slashMatch) {
+      start = new Date(
+        Number(slashMatch[3]),
+        Number(slashMatch[1]) - 1,
+        Number(slashMatch[2]),
+      );
+    } else {
+      start = new Date(rawStartDate);
+    }
+  }
+
+  if (Number.isNaN(start.getTime())) {
     return "-";
   }
 
-  const endDate = new Date(year, month - 1, day);
+  /* Program Days includes the start date. */
+  start.setDate(start.getDate() + programDays - 1);
 
-  // Include the start date as the first program day
-  endDate.setDate(endDate.getDate() + programDays - 1);
-
-  const endYear = endDate.getFullYear();
-  const endMonth = String(endDate.getMonth() + 1).padStart(2, "0");
-  const endDay = String(endDate.getDate()).padStart(2, "0");
-
-  return `${endYear}-${endMonth}-${endDay}`;
+  return formatCandidateDate(start);
 }
 
 
@@ -1630,23 +1701,37 @@ function openUploadFileSelector() {
 
   async function saveUploadedFile() {
   if (!selectedFile) {
-    alert("Please select a file.");
+    alert(
+      "Please select a file.",
+    );
+
     return;
   }
 
-  if (!uploadedBy.trim()) {
+    if (!uploadedBy.trim()) {
     alert("Please enter Updated By name.");
     return;
   }
 
   if (!candidateId) {
-    alert("Candidate ID is missing.");
+    alert(
+      "Candidate ID is missing.",
+    );
+
     return;
   }
 
-  // ==================================================
-  // INTERVIEW CALL
-  // ==================================================
+  /*
+  ========================================
+  INTERVIEW VALIDATION
+  ========================================
+  */
+
+  /*
+  ========================================
+  INTERVIEW CALL VALIDATION
+  ========================================
+  */
 
   if (uploadType === "Interview Call") {
     if (!companyName.trim()) {
@@ -1665,24 +1750,11 @@ function openUploadFileSelector() {
     }
   }
 
-  // ==================================================
-  // REPORT
-  // ==================================================
-
-  if (uploadType === "Report") {
-    const isPDF =
-      selectedFile.type === "application/pdf" ||
-      selectedFile.name.toLowerCase().endsWith(".pdf");
-
-    if (!isPDF) {
-      alert("Report must be a PDF file.");
-      return;
-    }
-  }
-
-  // ==================================================
-  // OFFER LETTER
-  // ==================================================
+  /*
+  ========================================
+  OFFER LETTER VALIDATION
+  ========================================
+  */
 
   if (uploadType === "Offer Letter") {
     if (!companyName.trim()) {
@@ -1695,32 +1767,72 @@ function openUploadFileSelector() {
       return;
     }
 
-    const isPDF =
+    const isOfferLetterPDF =
       selectedFile.type === "application/pdf" ||
       selectedFile.name.toLowerCase().endsWith(".pdf");
 
-    if (!isPDF) {
+    if (!isOfferLetterPDF) {
       alert("Offer Letter must be a PDF file.");
       return;
     }
   }
 
+  /*
+  ========================================
+  REPORT VALIDATION
+  ========================================
+  */
+
+  if (uploadType === "Report") {
+    const isPDF =
+      selectedFile.type ===
+        "application/pdf" ||
+      selectedFile.name
+        .toLowerCase()
+        .endsWith(".pdf");
+
+    if (!isPDF) {
+      alert(
+        "Report or Offer Letter must be a PDF file.",
+      );
+
+      return;
+    }
+  }
+
   try {
-    setUploading(true);
-
-    const formData = new FormData();
-
-    formData.append("file", selectedFile);
-
-    formData.append("type", uploadType);
-
-    formData.append(
-      "uploadedBy",
-      uploadedBy.trim(),
+    setUploading(
+      true,
     );
 
-    // Interview Call
-    if (uploadType === "Interview Call") {
+    const formData =
+      new FormData();
+
+    formData.append(
+      "file",
+      selectedFile,
+    );
+
+    formData.append(
+      "type",
+      uploadType,
+    );
+
+    formData.append(
+  "uploadedBy",
+  uploadedBy.trim(),
+);
+
+    /*
+    ========================================
+    INTERVIEW DATA
+    ========================================
+    */
+
+    if (
+      uploadType === "Interview Call" ||
+      uploadType === "Offer Letter"
+    ) {
       formData.append(
         "company",
         companyName.trim(),
@@ -1732,64 +1844,60 @@ function openUploadFileSelector() {
       );
     }
 
-    // Offer Letter
-    if (uploadType === "Offer Letter") {
-      formData.append(
-        "company",
-        companyName.trim(),
-      );
+    /*
+    ========================================
+    REPORT DATA
+    ========================================
+    */
 
-      formData.append(
-        "role",
-        roleName.trim(),
-      );
-    }
-
-    // Report
-    if (uploadType === "Report") {
+    if (
+      uploadType ===
+      "Report"
+    ) {
       formData.append(
         "reportType",
         reportType,
       );
     }
 
-    const response = await fetch(
-      `${API_BASE_URL}/api/candidates/${candidateId}/reports`,
-      {
-        method: "POST",
-        body: formData,
-      },
-    );
+    const response =
+      await fetch(
+        `${API_BASE_URL}/api/candidates/${candidateId}/reports`,
+        {
+          method: "POST",
 
-    const responseText =
-      await response.text();
-
-    let data: any = {};
-
-    try {
-      data = responseText
-        ? JSON.parse(responseText)
-        : {};
-    } catch {
-      data = {
-        message: responseText,
-      };
-    }
+          body: formData,
+        },
+      );
 
     if (!response.ok) {
+      const text =
+        await response.text();
+
       throw new Error(
-        data?.message ||
+        text ||
           `Upload failed (${response.status})`,
       );
     }
 
+    const data =
+      await response.json();
+
     const newReport =
-      normalizeReport(data);
+      normalizeReport(
+        data,
+      );
 
     newReport.fileUrl =
       resolveFileUrl(
         newReport.fileUrl,
       );
+
+    /*
+    ========================================
+    UPDATE LIST
+    ========================================
+    */
 
     setUploadedReports(
       (previous) => [
@@ -1801,27 +1909,27 @@ function openUploadFileSelector() {
     setReportsPage(1);
 
     alert(
-      uploadType === "Offer Letter"
-        ? "Offer Letter uploaded successfully."
-        : `${selectedFile.name} uploaded successfully.`,
+      `${selectedFile.name} uploaded successfully.`,
     );
 
     closeUploadModal();
 
-  } catch (error) {
+  } catch (err) {
     console.error(
       "Report upload error:",
-      error,
+      err,
     );
 
     alert(
-      error instanceof Error
-        ? error.message
+      err instanceof Error
+        ? err.message
         : "Unable to upload the file.",
     );
 
   } finally {
-    setUploading(false);
+    setUploading(
+      false,
+    );
   }
 }
 
@@ -2398,27 +2506,6 @@ async function handleMARUpload() {
         0,
     );
 
-  /*
-  APPLICATIONS USED
-
-  Use creditsUsed for the Program Performance
-  Applications card so the card displays:
-
-  Applications Used / Total Plan
-
-  Example:
-  28 / 100
-  */
-  const creditsUsed =
-    Number(
-      c.creditsUsed ??
-        Math.max(
-          creditsTotal -
-            creditsRemaining,
-          0,
-        ),
-    );
-
 
     /*
 |-----------------------------------------
@@ -2727,12 +2814,12 @@ const paginatedApplications = applicationHistory.slice(
             </div>
 
             <p className="mt-1 text-3xl font-semibold">
-              {creditsUsed} / {creditsTotal}
-            </p>
+  {creditsRemaining} / {creditsTotal}
+</p>
 
-            <p className="mt-3 text-xs text-muted-foreground">
-              Applications used / Total plan
-            </p>
+<p className="mt-3 text-xs text-muted-foreground">
+  Applications remaining / Total plan
+</p>
 
           </CardContent>
         </Card>
@@ -3124,7 +3211,7 @@ const paginatedApplications = applicationHistory.slice(
               </div>
 
               <p className="mt-2 break-words text-sm font-medium">
-                {c.startDate || "-"}
+                {formatCandidateDate(c.startDate)}
               </p>
 
             </div>
@@ -3143,11 +3230,12 @@ const paginatedApplications = applicationHistory.slice(
               </div>
 
               <p className="mt-2 break-words text-sm font-medium">
-                {c.endDate ||
-  getProgramEndDate(
-    c.startDate,
-    c.programDays
-  )}
+                {c.endDate
+  ? formatCandidateDate(c.endDate)
+  : getProgramEndDate(
+      c.startDate,
+      c.programDays,
+    )}
               </p>
 
             </div>
