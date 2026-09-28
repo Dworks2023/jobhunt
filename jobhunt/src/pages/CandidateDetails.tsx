@@ -1,5 +1,4 @@
 import {
-  ArrowLeft,
   Calendar,
   Coins,
   Eye,
@@ -82,7 +81,8 @@ type Tab =
 
 type ReportType =
   | "Interview Call"
-  | "Report";
+  | "Report"
+  | "Offer Letter";
 
 
 
@@ -158,6 +158,8 @@ type UploadedReport = {
 
   uploadedBy?: string;
 
+  updatedBy?: string;
+
   company?: string;
 
   role?: string;
@@ -198,7 +200,6 @@ type ProgramActivity = {
   conductedBy: string;
   subject: string;
   notes: string;
-  nextSteps?: string;
   createdAt?: string;
 };
 
@@ -433,10 +434,11 @@ function normalizeReport(
         .split("T")[0],
 
     type:
-      report?.type ===
-      "Report"
-        ? "Report"
-        : "Interview Call",
+      report?.type === "Offer Letter"
+        ? "Offer Letter"
+        : report?.type === "Report"
+          ? "Report"
+          : "Interview Call",
 
 
     uploadedBy:
@@ -732,11 +734,12 @@ const [isMARUploading, setIsMARUploading] = useState(false);
   const [programActivityNotes, setProgramActivityNotes] =
     useState("");
 
-  const [programActivityNextSteps, setProgramActivityNextSteps] =
-    useState("");
 
   const [savingProgramActivity, setSavingProgramActivity] =
     useState(false);
+
+  const [viewingMeetingReport, setViewingMeetingReport] =
+    useState<ProgramActivity | null>(null);
 
 
   /*
@@ -1430,7 +1433,6 @@ async function saveDailyApplications() {
     );
     setProgramActivitySubject("");
     setProgramActivityNotes("");
-    setProgramActivityNextSteps("");
     setProgramActivityModalOpen(true);
   }
 
@@ -1456,7 +1458,6 @@ async function saveDailyApplications() {
             conductedBy: programActivityConductedBy.trim(),
             subject: programActivitySubject.trim(),
             notes: programActivityNotes.trim(),
-            nextSteps: programActivityNextSteps.trim(),
           }),
         },
       );
@@ -1591,8 +1592,8 @@ function openUploadFileSelector() {
   */
 
   if (
-    uploadType ===
-    "Report"
+    uploadType === "Report" ||
+    uploadType === "Offer Letter"
   ) {
     const isPDF =
       file.type ===
@@ -1603,7 +1604,7 @@ function openUploadFileSelector() {
 
     if (!isPDF) {
       alert(
-        "Reports must be uploaded as PDF files only.",
+        "Reports and Offer Letters must be PDF files.",
       );
 
       event.target.value = "";
@@ -1629,128 +1630,97 @@ function openUploadFileSelector() {
 
   async function saveUploadedFile() {
   if (!selectedFile) {
-    alert(
-      "Please select a file.",
-    );
-
+    alert("Please select a file.");
     return;
   }
 
-    if (!uploadedBy.trim()) {
+  if (!uploadedBy.trim()) {
     alert("Please enter Updated By name.");
     return;
   }
 
   if (!candidateId) {
-    alert(
-      "Candidate ID is missing.",
-    );
-
+    alert("Candidate ID is missing.");
     return;
   }
 
-  /*
-  ========================================
-  INTERVIEW VALIDATION
-  ========================================
-  */
+  // ==================================================
+  // INTERVIEW CALL
+  // ==================================================
 
-  if (
-    uploadType ===
-    "Interview Call"
-  ) {
-    if (
-      !companyName.trim()
-    ) {
-      alert(
-        "Please enter company name.",
-      );
-
+  if (uploadType === "Interview Call") {
+    if (!companyName.trim()) {
+      alert("Please enter company name.");
       return;
     }
 
-    if (
-      !roleName.trim()
-    ) {
-      alert(
-        "Please enter role.",
-      );
-
+    if (!roleName.trim()) {
+      alert("Please enter role.");
       return;
     }
 
-    if (
-      !selectedFile.type.startsWith(
-        "image/",
-      )
-    ) {
-      alert(
-        "Interview Call must be an image file.",
-      );
-
+    if (!selectedFile.type.startsWith("image/")) {
+      alert("Interview Call must be an image file.");
       return;
     }
   }
 
-  /*
-  ========================================
-  REPORT VALIDATION
-  ========================================
-  */
+  // ==================================================
+  // REPORT
+  // ==================================================
 
-  if (
-    uploadType ===
-    "Report"
-  ) {
+  if (uploadType === "Report") {
     const isPDF =
-      selectedFile.type ===
-        "application/pdf" ||
-      selectedFile.name
-        .toLowerCase()
-        .endsWith(".pdf");
+      selectedFile.type === "application/pdf" ||
+      selectedFile.name.toLowerCase().endsWith(".pdf");
 
     if (!isPDF) {
-      alert(
-        "Report must be a PDF file.",
-      );
+      alert("Report must be a PDF file.");
+      return;
+    }
+  }
 
+  // ==================================================
+  // OFFER LETTER
+  // ==================================================
+
+  if (uploadType === "Offer Letter") {
+    if (!companyName.trim()) {
+      alert("Please enter company name.");
+      return;
+    }
+
+    if (!roleName.trim()) {
+      alert("Please enter role.");
+      return;
+    }
+
+    const isPDF =
+      selectedFile.type === "application/pdf" ||
+      selectedFile.name.toLowerCase().endsWith(".pdf");
+
+    if (!isPDF) {
+      alert("Offer Letter must be a PDF file.");
       return;
     }
   }
 
   try {
-    setUploading(
-      true,
-    );
+    setUploading(true);
 
-    const formData =
-      new FormData();
+    const formData = new FormData();
 
-    formData.append(
-      "file",
-      selectedFile,
-    );
+    formData.append("file", selectedFile);
+
+    formData.append("type", uploadType);
 
     formData.append(
-      "type",
-      uploadType,
+      "uploadedBy",
+      uploadedBy.trim(),
     );
 
-    formData.append(
-  "uploadedBy",
-  uploadedBy.trim(),
-);
-
-    /*
-    ========================================
-    INTERVIEW DATA
-    ========================================
-    */
-
-    if (
-      uploadType ===
-      "Interview Call"
-    ) {
+    // Interview Call
+    if (uploadType === "Interview Call") {
       formData.append(
         "company",
         companyName.trim(),
@@ -1762,60 +1732,64 @@ function openUploadFileSelector() {
       );
     }
 
-    /*
-    ========================================
-    REPORT DATA
-    ========================================
-    */
+    // Offer Letter
+    if (uploadType === "Offer Letter") {
+      formData.append(
+        "company",
+        companyName.trim(),
+      );
 
-    if (
-      uploadType ===
-      "Report"
-    ) {
+      formData.append(
+        "role",
+        roleName.trim(),
+      );
+    }
+
+    // Report
+    if (uploadType === "Report") {
       formData.append(
         "reportType",
         reportType,
       );
     }
 
-    const response =
-      await fetch(
-        `${API_BASE_URL}/api/candidates/${candidateId}/reports`,
-        {
-          method: "POST",
+    const response = await fetch(
+      `${API_BASE_URL}/api/candidates/${candidateId}/reports`,
+      {
+        method: "POST",
+        body: formData,
+      },
+    );
 
-          body: formData,
-        },
-      );
+    const responseText =
+      await response.text();
+
+    let data: any = {};
+
+    try {
+      data = responseText
+        ? JSON.parse(responseText)
+        : {};
+    } catch {
+      data = {
+        message: responseText,
+      };
+    }
 
     if (!response.ok) {
-      const text =
-        await response.text();
-
       throw new Error(
-        text ||
+        data?.message ||
           `Upload failed (${response.status})`,
       );
     }
 
-    const data =
-      await response.json();
-
     const newReport =
-      normalizeReport(
-        data,
-      );
+      normalizeReport(data);
 
     newReport.fileUrl =
       resolveFileUrl(
         newReport.fileUrl,
       );
-
-    /*
-    ========================================
-    UPDATE LIST
-    ========================================
-    */
 
     setUploadedReports(
       (previous) => [
@@ -1827,27 +1801,27 @@ function openUploadFileSelector() {
     setReportsPage(1);
 
     alert(
-      `${selectedFile.name} uploaded successfully.`,
+      uploadType === "Offer Letter"
+        ? "Offer Letter uploaded successfully."
+        : `${selectedFile.name} uploaded successfully.`,
     );
 
     closeUploadModal();
 
-  } catch (err) {
+  } catch (error) {
     console.error(
       "Report upload error:",
-      err,
+      error,
     );
 
     alert(
-      err instanceof Error
-        ? err.message
+      error instanceof Error
+        ? error.message
         : "Unable to upload the file.",
     );
 
   } finally {
-    setUploading(
-      false,
-    );
+    setUploading(false);
   }
 }
 
@@ -2261,15 +2235,15 @@ async function handleMARUpload() {
   ) {
 
     if (
-      report.type ===
-      "Interview Call"
+      report.type === "Interview Call" ||
+      report.type === "Offer Letter"
     ) {
 
       return (
         <>
           <p className="font-medium">
             {report.role ||
-              "Interview"}
+              (report.type === "Offer Letter" ? "Offer Letter" : "Interview")}
           </p>
 
           <p className="text-xs text-muted-foreground">
@@ -2347,23 +2321,12 @@ async function handleMARUpload() {
           "This candidate does not exist in the database."}
       </p>
 
-      <Button
-        variant="outline"
-        size="default"
-        className="group mt-6 h-11 rounded-xl border-border/70 bg-card px-4 shadow-sm transition-all duration-200 hover:-translate-x-0.5 hover:border-primary/40 hover:bg-primary/5 hover:text-primary hover:shadow-md"
-        asChild
+      <Link
+        to="/candidates"
+        className="mt-6 inline-flex h-12 items-center justify-center rounded-xl border-2 border-emerald-500/40 bg-emerald-500/20 px-6 text-base font-semibold text-emerald-400 shadow-md transition-all duration-200 hover:-translate-y-0.5 hover:border-emerald-400 hover:bg-emerald-500 hover:text-white hover:shadow-lg"
       >
-        <Link
-  to="/candidates"
-  className="group mt-6 inline-flex h-12 items-center gap-3 rounded-xl border-2 border-emerald-500/40 bg-emerald-500/10 px-5 text-sm font-semibold text-emerald-400 shadow-md transition-all duration-200 hover:-translate-y-0.5 hover:border-emerald-400 hover:bg-emerald-500 hover:text-white hover:shadow-lg"
->
-  <span className="flex size-8 items-center justify-center rounded-lg bg-emerald-500/20 transition-colors group-hover:bg-white/20">
-    <ArrowLeft className="size-5 transition-transform group-hover:-translate-x-1" />
-  </span>
-
-  <span>Back to Candidates</span>
-</Link>
-      </Button>
+        Back to Candidates
+      </Link>
     </CardContent>
   </Card>
 </Layout>
@@ -2435,6 +2398,27 @@ async function handleMARUpload() {
         0,
     );
 
+  /*
+  APPLICATIONS USED
+
+  Use creditsUsed for the Program Performance
+  Applications card so the card displays:
+
+  Applications Used / Total Plan
+
+  Example:
+  28 / 100
+  */
+  const creditsUsed =
+    Number(
+      c.creditsUsed ??
+        Math.max(
+          creditsTotal -
+            creditsRemaining,
+          0,
+        ),
+    );
+
 
     /*
 |-----------------------------------------
@@ -2450,6 +2434,11 @@ const interviewCallsCount =
 const reportsCount =
   uploadedReports.filter(
     (item) => item.type === "Report"
+  ).length;
+
+const offerLettersCount =
+  uploadedReports.filter(
+    (item) => item.type === "Offer Letter"
   ).length;
 
 
@@ -2513,16 +2502,12 @@ const paginatedApplications = applicationHistory.slice(
   <>
     <Layout>
       <div className="mb-5">
-        <Button
-          variant="ghost"
-          size="sm"
-          asChild
+        <Link
+          to="/candidates"
+          className="inline-flex h-12 items-center justify-center rounded-xl border-2 border-emerald-500/40 bg-emerald-500/20 px-6 text-base font-semibold text-emerald-400 shadow-md transition-all duration-200 hover:-translate-y-0.5 hover:border-emerald-400 hover:bg-emerald-500 hover:text-white hover:shadow-lg"
         >
-          <Link to="/candidates">
-            <ArrowLeft className="size-4" />
-            Back to Candidates
-          </Link>
-        </Button>
+          Back to Candidates
+        </Link>
       </div>
 
 
@@ -2565,39 +2550,35 @@ const paginatedApplications = applicationHistory.slice(
               </div>
 
 
-              <div className="grid grid-cols-2 gap-4 text-sm sm:grid-cols-3">
+              <div className="grid w-full gap-3 sm:grid-cols-3 lg:w-auto">
 
-                <div>
-                  <p className="text-xs text-muted-foreground">
+                <div className="min-w-[140px] rounded-xl border border-border/70 bg-card/60 px-5 py-4 shadow-sm">
+                  <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
                     Plan
                   </p>
 
-                  <p className="mt-1 font-medium">
-                    {c.plan ||
-                      "-"}
+                  <p className="mt-2 text-xl font-semibold">
+                    {c.plan || "-"}
                   </p>
                 </div>
 
-                <div>
-                  <p className="text-xs text-muted-foreground">
+                <div className="min-w-[140px] rounded-xl border border-border/70 bg-card/60 px-5 py-4 shadow-sm">
+                  <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
                     Credits Left
                   </p>
 
-                  <p className="mt-1 font-medium">
-                    {creditsRemaining}
-                    {" / "}
-                    {creditsTotal}
+                  <p className="mt-2 text-xl font-semibold">
+                    {creditsRemaining} / {creditsTotal}
                   </p>
                 </div>
 
-                <div>
-                  <p className="text-xs text-muted-foreground">
+                <div className="min-w-[140px] rounded-xl border border-border/70 bg-card/60 px-5 py-4 shadow-sm">
+                  <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
                     Days Left
                   </p>
 
-                  <p className="mt-1 font-medium">
-                    {c.daysRemaining ??
-                      0}
+                  <p className="mt-2 text-xl font-semibold">
+                    {c.daysRemaining ?? 0}
                   </p>
                 </div>
 
@@ -2746,12 +2727,12 @@ const paginatedApplications = applicationHistory.slice(
             </div>
 
             <p className="mt-1 text-3xl font-semibold">
-  {creditsRemaining} / {creditsTotal}
-</p>
+              {creditsUsed} / {creditsTotal}
+            </p>
 
-<p className="mt-3 text-xs text-muted-foreground">
-  Applications remaining / Total plan
-</p>
+            <p className="mt-3 text-xs text-muted-foreground">
+              Applications used / Total plan
+            </p>
 
           </CardContent>
         </Card>
@@ -2804,7 +2785,7 @@ const paginatedApplications = applicationHistory.slice(
             </div>
 
             <p className="mt-1 text-3xl font-semibold">
-              {totals.offers}
+              {offerLettersCount}
             </p>
 
             <p className="mt-3 text-xs text-muted-foreground">
@@ -4056,7 +4037,6 @@ const paginatedApplications = applicationHistory.slice(
                         <th className="px-6 py-3 font-medium">Conducted By</th>
                         <th className="px-6 py-3 font-medium">Subject</th>
                         <th className="px-6 py-3 font-medium">Meeting Report</th>
-                        <th className="px-6 py-3 font-medium">Next Steps</th>
                         <th className="px-6 py-3 text-center font-medium">Action</th>
                       </tr>
                     </thead>
@@ -4081,15 +4061,17 @@ const paginatedApplications = applicationHistory.slice(
                           <td className="max-w-[220px] px-6 py-4">
                             {activity.subject || "-"}
                           </td>
-                          <td className="max-w-[320px] px-6 py-4">
-                            <p className="line-clamp-3 whitespace-pre-wrap text-muted-foreground">
-                              {activity.notes || "-"}
-                            </p>
-                          </td>
-                          <td className="max-w-[260px] px-6 py-4">
-                            <p className="line-clamp-3 whitespace-pre-wrap text-muted-foreground">
-                              {activity.nextSteps || "-"}
-                            </p>
+                          <td className="px-6 py-4 text-center">
+                            <button
+                              type="button"
+                              className="inline-flex items-center justify-center gap-2 rounded-md border px-4 py-2 text-sm font-medium transition-colors hover:bg-muted"
+                              onClick={() => setViewingMeetingReport(activity)}
+                              title="View meeting report"
+                              aria-label="View meeting report"
+                            >
+                              <Eye className="size-4" />
+                              View
+                            </button>
                           </td>
                           <td className="px-6 py-4 text-center">
                             <button
@@ -4218,16 +4200,6 @@ const paginatedApplications = applicationHistory.slice(
                       />
                     </div>
 
-                    <div className="md:col-span-2">
-                      <label className="mb-2 block text-sm font-medium">Next Steps</label>
-                      <textarea
-                        value={programActivityNextSteps}
-                        onChange={(event) => setProgramActivityNextSteps(event.target.value)}
-                        rows={3}
-                        placeholder="Enter follow-up actions, responsibilities, or next meeting details..."
-                        className="w-full resize-none rounded-md border bg-background px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-ring"
-                      />
-                    </div>
                   </div>
 
                   <div className="mt-6 flex justify-end gap-3">
@@ -4250,6 +4222,80 @@ const paginatedApplications = applicationHistory.slice(
                       onClick={saveProgramActivity}
                     >
                       {savingProgramActivity ? "Saving..." : "Save Activity"}
+                    </Button>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {viewingMeetingReport && (
+              <div
+                className="fixed inset-0 z-[120] flex items-center justify-center bg-black/70 p-4 backdrop-blur-sm"
+                onMouseDown={(event) => {
+                  if (event.target === event.currentTarget) {
+                    setViewingMeetingReport(null);
+                  }
+                }}
+              >
+                <div className="flex max-h-[90vh] w-full max-w-3xl flex-col overflow-hidden rounded-2xl border bg-background shadow-2xl">
+                  <div className="flex shrink-0 items-start justify-between border-b px-6 py-5">
+                    <div className="min-w-0">
+                      <h2 className="text-xl font-semibold">
+                        Meeting Report
+                      </h2>
+                      <p className="mt-1 text-sm text-muted-foreground">
+                        {viewingMeetingReport.date || "-"} · {viewingMeetingReport.activityType || "Meeting"}
+                      </p>
+                    </div>
+
+                    <button
+                      type="button"
+                      className="ml-4 inline-flex size-9 shrink-0 items-center justify-center rounded-md hover:bg-muted"
+                      onClick={() => setViewingMeetingReport(null)}
+                      aria-label="Close meeting report"
+                    >
+                      <X className="size-5" />
+                    </button>
+                  </div>
+
+                  <div className="min-h-0 flex-1 overflow-y-auto p-6">
+                    <div className="grid gap-4 sm:grid-cols-2">
+                      <div className="rounded-xl border bg-muted/20 p-4">
+                        <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                          Conducted By
+                        </p>
+                        <p className="mt-1 break-words text-sm font-medium">
+                          {viewingMeetingReport.conductedBy || "-"}
+                        </p>
+                      </div>
+
+                      <div className="rounded-xl border bg-muted/20 p-4">
+                        <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                          Subject
+                        </p>
+                        <p className="mt-1 break-words text-sm font-medium">
+                          {viewingMeetingReport.subject || "-"}
+                        </p>
+                      </div>
+                    </div>
+
+                    <div className="mt-5 rounded-xl border p-5">
+                      <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                        Full Meeting Report
+                      </p>
+                      <div className="mt-3 whitespace-pre-wrap break-words text-sm leading-7">
+                        {viewingMeetingReport.notes || "No meeting report was entered."}
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="flex shrink-0 justify-end border-t px-6 py-4">
+                    <Button
+                      type="button"
+                      variant="outline"
+                      onClick={() => setViewingMeetingReport(null)}
+                    >
+                      Close
                     </Button>
                   </div>
                 </div>
@@ -4346,6 +4392,11 @@ const paginatedApplications = applicationHistory.slice(
             fileInputRef
           }
           type="file"
+          accept={
+            uploadType === "Interview Call"
+              ? "image/*"
+              : ".pdf,application/pdf"
+          }
           className="hidden"
           onChange={
             handleFileSelection
@@ -4386,7 +4437,7 @@ const paginatedApplications = applicationHistory.slice(
         </h2>
 
         <p className="mt-1 text-sm text-muted-foreground">
-          Upload an interview call image or program report.
+          Upload an interview call image, program report, or offer letter PDF.
         </p>
 
       </div>
@@ -4412,11 +4463,16 @@ const paginatedApplications = applicationHistory.slice(
 
               setUploadType(value);
 
+              // Clear any file selected for the previous upload type.
+              // This prevents an Interview Call image from being reused
+              // when switching to Offer Letter.
               setSelectedFile(null);
 
               setCompanyName("");
 
               setRoleName("");
+
+              setReportType("15 Days Report");
 
             }}
             className="mt-2 h-10 w-full rounded-md border bg-background px-3 text-sm outline-none focus:ring-2 focus:ring-ring"
@@ -4430,13 +4486,18 @@ const paginatedApplications = applicationHistory.slice(
               Report
             </option>
 
+            <option value="Offer Letter">
+              Offer Letter
+            </option>
+
           </select>
 
         </div>
 
         {/* INTERVIEW FIELDS */}
 
-        {uploadType === "Interview Call" && (
+        {(uploadType === "Interview Call" ||
+          uploadType === "Offer Letter") && (
           <>
 
             <div>
@@ -4478,7 +4539,9 @@ const paginatedApplications = applicationHistory.slice(
             <div>
 
               <label className="text-sm font-medium">
-                Upload Interview Call
+                {uploadType === "Offer Letter"
+                  ? "Upload Offer Letter"
+                  : "Upload Interview Call"}
               </label>
 
               <button
@@ -4490,11 +4553,15 @@ const paginatedApplications = applicationHistory.slice(
                 <Upload className="mb-3 size-8 text-muted-foreground" />
 
                 <p className="text-sm font-medium">
-                  Click to upload image
+                  {uploadType === "Offer Letter"
+                    ? "Click to upload offer letter PDF"
+                    : "Click to upload image"}
                 </p>
 
                 <p className="mt-1 text-xs text-muted-foreground">
-                  JPG, JPEG, PNG or WEBP only
+                  {uploadType === "Offer Letter"
+                    ? "PDF files only"
+                    : "JPG, JPEG, PNG or WEBP only"}
                 </p>
 
               </button>

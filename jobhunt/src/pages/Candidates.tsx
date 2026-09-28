@@ -417,6 +417,20 @@ async function loadCandidates() {
 
 
   /* ============================================= */
+  /* PLAN FILTER OPTIONS */
+  /* ============================================= */
+
+  // Keep the application plans fixed.
+  // Do not replace these with Starter/Growth/Elite names.
+  const availablePlans = [
+    "100",
+    "250",
+    "500",
+    "1000",
+  ];
+
+
+  /* ============================================= */
   /* FILTERED CANDIDATES */
   /* ============================================= */
 
@@ -451,19 +465,37 @@ async function loadCandidates() {
               );
 
 
+          // Plan filter:
+          // Compare against the exact plan value returned by the backend,
+          // after trimming whitespace and normalizing case.
+          const candidatePlan = String(
+            candidate.plan ?? "",
+          )
+            .trim()
+            .toLowerCase();
+
+          const selectedPlan = String(
+            plan ?? "",
+          )
+            .trim()
+            .toLowerCase();
+
           const matchesPlan =
-            plan === "all" ||
-            candidate.plan === plan;
+            selectedPlan === "all" ||
+            (candidatePlan !== "" &&
+              candidatePlan === selectedPlan);
 
 
           const matchesDomain =
             domain === "all" ||
-            candidate.domain === domain;
+            String(candidate.domain ?? "").trim() ===
+              String(domain ?? "").trim();
 
 
           const matchesStatus =
             status === "all" ||
-            candidate.status === status;
+            String(candidate.status ?? "").trim() ===
+              String(status ?? "").trim();
 
 
           return (
@@ -1489,15 +1521,15 @@ assignedSpecialist:
                   All plans
                 </option>
 
-                {plans.map(
+                {availablePlans.map(
                   (item) => (
 
                     <option
-                      key={item.name}
-                      value={item.name}
+                      key={item}
+                      value={item}
                     >
 
-                      {item.name}
+                      {item}
 
                     </option>
 
@@ -2241,8 +2273,24 @@ assignedSpecialist:
         }
       );
 
+      // Keep the Candidates page immediately in sync.
+      setCandidateStatuses((current) => {
+        const next = { ...current };
+
+        newCandidates.forEach((candidate) => {
+          next[candidate.id] =
+            (candidate.status ?? "Active") as Status;
+        });
+
+        return next;
+      });
+
       return [...current, ...newCandidates];
     });
+
+    // Re-read the backend so imported candidates use the same
+    // calculated daysRemaining/status values used by Dashboard.
+    void loadCandidates();
   }}
 />
      
@@ -2516,7 +2564,7 @@ function CandidateFormModal({
                       startDate: event.target.value,
                     }))
                   }
-                  className={inputClass}
+                  className={`${inputClass} [&::-webkit-calendar-picker-indicator]:invert [&::-webkit-calendar-picker-indicator]:opacity-100`}
                 />
               </FormField>
 

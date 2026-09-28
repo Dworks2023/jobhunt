@@ -61,6 +61,7 @@ type Candidate = {
   plan?: string;
 
   startDate?: string;
+  programDays?: number;
   status?: string;
 
   creditsTotal?: number;
@@ -71,7 +72,7 @@ type Candidate = {
   createdAt?: string | Date;
 
   // Interview analytics
- uploadedReports?: UploadedReport[];
+  uploadedReports?: UploadedReport[];
 };
 
 const DOMAIN_CHART_COLORS = [
@@ -181,6 +182,14 @@ if (Array.isArray(data)) {
     };
 
     loadDashboard();
+
+    // Keep the dashboard synchronized when a candidate is added, imported,
+    // paused, or changed to Expiring Soon from the Candidates page.
+    const refreshInterval = window.setInterval(loadDashboard, 30000);
+
+    return () => {
+      window.clearInterval(refreshInterval);
+    };
   }, []);
 
   /*
@@ -279,20 +288,24 @@ if (Array.isArray(data)) {
   */
 
   const recent = useMemo(() => {
-    return [...candidates]
-      .sort((a, b) => {
-        const dateA = new Date(
-          a.createdAt || a.startDate || 0,
-        ).getTime();
+  return [...candidates]
+    .sort((a, b) => {
+      const dateA = new Date(
+        a.createdAt ||
+          a.startDate ||
+          0,
+      ).getTime();
 
-        const dateB = new Date(
-          b.createdAt || b.startDate || 0,
-        ).getTime();
+      const dateB = new Date(
+        b.createdAt ||
+          b.startDate ||
+          0,
+      ).getTime();
 
-        return dateB - dateA;
-      })
-      .slice(0, 6);
-  }, [candidates]);
+      return dateB - dateA;
+    })
+    .slice(0, 5);
+}, [candidates]);
 
   /*
   ========================================
@@ -303,16 +316,40 @@ if (Array.isArray(data)) {
   const attention = useMemo(() => {
     return candidates
       .filter((candidate) => {
+        const normalizedStatus =
+          String(candidate.status ?? "Active")
+            .trim()
+            .toLowerCase();
+
+        // A candidate must appear in Needs attention when the
+        // saved status is Expiring Soon OR Paused.
+        const isPaused =
+          normalizedStatus === "paused";
+
         const isExpiring =
-          candidate.status === "Expiring Soon" ||
+          normalizedStatus === "expiring soon" ||
           Number(candidate.daysRemaining ?? 999) < 30;
 
         const hasLowCredits =
           Number(candidate.creditsRemaining ?? 999) < 25;
 
-        return isExpiring || hasLowCredits;
+        return isPaused || isExpiring || hasLowCredits;
       })
-      .slice(0, 4);
+      .sort((a, b) => {
+        const priority = (candidate: Candidate) => {
+          const status =
+            String(candidate.status ?? "")
+              .trim()
+              .toLowerCase();
+
+          if (status === "paused") return 0;
+          if (status === "expiring soon") return 1;
+          if (Number(candidate.daysRemaining ?? 999) < 30) return 2;
+          return 3;
+        };
+
+        return priority(a) - priority(b);
+      });
   }, [candidates]);
 
   /*
@@ -733,58 +770,78 @@ const interviewDomainData = useMemo(() => {
 
         <Card>
           <CardHeader>
-            <CardTitle>
-              Needs attention
-            </CardTitle>
+            <div className="flex items-center justify-between gap-3">
+              <CardTitle>Needs attention</CardTitle>
+              {attention.length > 0 && (
+                <span className="inline-flex min-w-6 items-center justify-center rounded-full bg-destructive/10 px-2 py-0.5 text-xs font-semibold text-destructive">
+                  {attention.length}
+                </span>
+              )}
+            </div>
           </CardHeader>
 
-          <CardContent className="space-y-4">
+          <CardContent className="max-h-[360px] space-y-4 overflow-y-auto pr-1">
             {attention.length > 0 ? (
-              attention.map((candidate) => (
-                <Link
-                  key={
-                    candidate._id ||
-                    candidate.id
-                  }
-                  to={`/candidates/${candidate.id}`}
-                  className="block rounded-xl border p-3 transition-colors hover:bg-accent/50"
-                >
-                  <div className="flex items-center justify-between gap-2">
-                    <p className="text-sm font-medium">
-                      {candidate.name}
+              attention.map((candidate) => {
+                const normalizedStatus =
+                  String(candidate.status ?? "Active")
+                    .trim()
+                    .toLowerCase();
+
+                const isPaused = normalizedStatus === "paused";
+                const isExpiring =
+                  normalizedStatus === "expiring soon" ||
+                  Number(candidate.daysRemaining ?? 999) < 30;
+
+                const reason = isPaused
+                  ? "Candidate is paused"
+                  : isExpiring
+                    ? "Program is expiring soon"
+                    : "Low credits remaining";
+
+                return (
+                  <Link
+                    key={candidate._id || candidate.id}
+                    to={`/candidates/${candidate.id}`}
+                    className="block rounded-xl border p-3 transition-colors hover:bg-accent/50"
+                  >
+                    <div className="flex items-center justify-between gap-2">
+                      <p className="truncate text-sm font-medium">
+                        {candidate.name}
+                      </p>
+
+                      <StatusBadge
+                        status={candidate.status || "Active"}
+                      />
+                    </div>
+
+                    <p className="mt-1 text-xs font-medium text-destructive">
+                      {reason}
                     </p>
 
-                    <StatusBadge
-                      status={
-                        candidate.status ||
-                        "Active"
+                    <p className="mt-1 text-xs text-muted-foreground">
+                      {candidate.daysRemaining ?? 0} days left · {candidate.creditsRemaining ?? 0} credits
+                    </p>
+
+                    <Progress
+                      value={
+                        candidate.creditsTotal
+                          ? Math.max(
+                              0,
+                              Math.min(
+                                100,
+                                (Number(candidate.creditsRemaining ?? 0) /
+                                  Number(candidate.creditsTotal)) *
+                                  100,
+                              ),
+                            )
+                          : 0
                       }
+                      className="mt-2 h-1.5"
                     />
-                  </div>
-
-                  <p className="mt-1 text-xs text-muted-foreground">
-                    {candidate.daysRemaining ?? 0}{" "}
-                    days left ·{" "}
-                    {candidate.creditsRemaining ?? 0}{" "}
-                    credits
-                  </p>
-
-                  <Progress
-                    value={
-                      candidate.creditsTotal
-                        ? (Number(
-                            candidate.creditsRemaining ?? 0,
-                          ) /
-                            Number(
-                              candidate.creditsTotal,
-                            )) *
-                          100
-                        : 0
-                    }
-                    className="mt-2 h-1.5"
-                  />
-                </Link>
-              ))
+                  </Link>
+                );
+              })
             ) : (
               <p className="text-sm text-muted-foreground">
                 No candidates need attention right now.
@@ -1039,116 +1096,129 @@ const interviewDomainData = useMemo(() => {
         </Card>
 
         {/* CANDIDATES BY DOMAIN */}
-        <Card className="!border-0 !shadow-none !outline-none !ring-0" style={{ border: "0", boxShadow: "none", outline: "none" }}>
-          <CardHeader>
-            <CardTitle>
-              Candidates by domain
-            </CardTitle>
-          </CardHeader>
+<Card
+  className="!border-0 !shadow-none !outline-none !ring-0"
+  style={{
+    border: "0",
+    boxShadow: "none",
+    outline: "none",
+  }}
+>
+  <CardHeader>
+    <CardTitle>
+      Candidates by domain
+    </CardTitle>
+  </CardHeader>
 
-          <CardContent className="h-[270px]">
-            {candidatesByDomain.length > 0 ? (
-              <div
-                className="h-full w-full border-0 outline-none ring-0"
-                style={{ border: "0", outline: "none", boxShadow: "none" }}
-              >
-                <ResponsiveContainer
-                  width="100%"
-                  height="100%"
-                >
-                <BarChart
-                  data={candidatesByDomain}
-                  margin={{
-                    top: 10,
-                    right: 15,
-                    left: 5,
-                    bottom: 10,
-                  }}
-                >
-                  <CartesianGrid
-                    horizontal={false}
-                    vertical={false}
-                    stroke="transparent"
-                  />
+  <CardContent className="h-[300px]">
+    {candidatesByDomain.length > 0 ? (
+      <div
+        className="h-full w-full"
+        style={{
+          border: "0",
+          outline: "none",
+          boxShadow: "none",
+        }}
+      >
+        <ResponsiveContainer
+          width="100%"
+          height="100%"
+        >
+          <BarChart
+            data={candidatesByDomain}
+            layout="vertical"
+            margin={{
+              top: 10,
+              right: 20,
+              left: -60,
+              bottom: 10,
+            }}
+          >
+            <CartesianGrid
+              horizontal={false}
+              vertical={false}
+              stroke="transparent"
+            />
 
-                  <XAxis
-                    type="category"
-                    dataKey="name"
-                    stroke="var(--color-muted-foreground)"
-                    fontSize={11}
-                    tickLine={false}
-                    axisLine={false}
-                    interval={0}
-                    tick={{ fill: "var(--color-muted-foreground)" }}
-                  />
+            <XAxis
+              type="number"
+              allowDecimals={false}
+              domain={[0, "auto"]}
+              stroke="var(--color-muted-foreground)"
+              fontSize={11}
+              tickLine={false}
+              axisLine={false}
+            />
 
-                  <YAxis
-                    type="number"
-                    allowDecimals={false}
-                    domain={[0, "auto"]}
-                    stroke="var(--color-muted-foreground)"
-                    fontSize={11}
-                    tickLine={false}
-                    axisLine={false}
-                    width={30}
-                  />
+            <YAxis
+              type="category"
+              dataKey="name"
+              width={135}
+              stroke="var(--color-muted-foreground)"
+              fontSize={11}
+              tickLine={false}
+              axisLine={false}
+              tick={{
+                fill: "var(--color-muted-foreground)",
+              }}
+            />
 
-                  <Tooltip
-                    cursor={{
-                      fill: "var(--color-muted)",
-                      opacity: 0.2,
-                    }}
-                    contentStyle={{
-                      background:
-                        "var(--color-background)",
-                      border: "none",
-                      boxShadow: "none",
-                      borderRadius: 12,
-                      fontSize: 12,
-                    }}
-                    formatter={(value) => [
-                      `${value} candidates`,
-                      "Total",
-                    ]}
-                  />
+            <Tooltip
+              cursor={{
+                fill: "var(--color-muted)",
+                opacity: 0.2,
+              }}
+              contentStyle={{
+                background:
+                  "var(--color-background)",
+                border: "none",
+                boxShadow: "none",
+                borderRadius: 12,
+                fontSize: 12,
+              }}
+              formatter={(value) => [
+                `${value} candidates`,
+                "Total",
+              ]}
+            />
 
-                  <Bar
-                    dataKey="value"
-                    name="Candidates"
-                    radius={[5, 5, 0, 0]}
-                    maxBarSize={42}
-                    label={{
-                      position: "top",
-                      fill: "var(--color-foreground)",
-                      fontSize: 11,
-                      fontWeight: 700,
-                    }}
-                  >
-                    {candidatesByDomain.map(
-                      (item, index) => (
-                        <Cell
-                          key={`${item.name}-${index}`}
-                          fill={getDistributionColor(
-                            item.name,
-                            index,
-                            "domain",
-                          )}
-                        />
-                      ),
+            <Bar
+              dataKey="value"
+              name="Candidates"
+              radius={[0, 5, 5, 0]}
+              maxBarSize={35}
+              label={{
+                position: "right",
+                fill: "var(--color-foreground)",
+                fontSize: 11,
+                fontWeight: 700,
+              }}
+            >
+              {candidatesByDomain.map(
+                (item, index) => (
+                  <Cell
+                    key={`${item.name}-${index}`}
+                    fill={getDistributionColor(
+                      item.name,
+                      index,
+                      "domain",
                     )}
-                  </Bar>
-                </BarChart>
-                </ResponsiveContainer>
-              </div>
-            ) : (
-              <div className="flex h-full items-center justify-center">
-                <p className="text-sm text-muted-foreground">
-                  No domain data available.
-                </p>
-              </div>
-            )}
-          </CardContent>
-        </Card>
+                  />
+                ),
+              )}
+            </Bar>
+          </BarChart>
+        </ResponsiveContainer>
+      </div>
+    ) : (
+      <div className="flex h-full items-center justify-center">
+        <p className="text-sm text-muted-foreground">
+          No domain data available.
+        </p>
+      </div>
+    )}
+  </CardContent>
+</Card>
 
         {/* CANDIDATES BY PLAN */}
         <Card className="!border-0 !shadow-none !outline-none !ring-0" style={{ border: "0", boxShadow: "none", outline: "none" }}>
