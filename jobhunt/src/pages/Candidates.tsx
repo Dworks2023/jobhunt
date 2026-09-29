@@ -430,92 +430,68 @@ async function loadCandidates() {
   ];
 
 
+
   /* ============================================= */
-  /* FILTERED CANDIDATES */
-  /* ============================================= */
+/* FILTERED CANDIDATES */
+/* ============================================= */
 
-  const rows =
-    useMemo(() => {
+const rows = useMemo(() => {
+  return localCandidates.filter((candidate) => {
 
-      return localCandidates.filter(
-        (
-          candidate,
-        ) => {
+    const search = query.trim().toLowerCase();
 
-          const search =
-            query
-              .trim()
-              .toLowerCase();
+    const matchesSearch =
+      !search ||
+      [
+        candidate.name,
+        candidate.email,
+        candidate.id,
+        candidate.targetRole,
+      ]
+        .filter(Boolean)
+        .some((value) =>
+          String(value).toLowerCase().includes(search)
+        );
 
+    // Plan filter: supports 250 and 250 Applications
+    const normalizePlan = (value: unknown): string => {
+      const normalized = String(value ?? "").trim().toLowerCase();
+      const numberMatch = normalized.match(/\d+/);
 
-          const matchesSearch =
-            !search ||
-            [
-              candidate.name,
-              candidate.email,
-              candidate.id,
-              candidate.targetRole,
-            ]
-              .filter(Boolean)
-              .some(
-                (value) =>
-                  String(value)
-                    .toLowerCase()
-                    .includes(search),
-              );
+      return numberMatch ? numberMatch[0] : normalized;
+    };
 
+    const candidatePlan = normalizePlan(candidate.plan);
+    const selectedPlan = normalizePlan(plan);
 
-          // Plan filter:
-          // Compare against the exact plan value returned by the backend,
-          // after trimming whitespace and normalizing case.
-          const candidatePlan = String(
-            candidate.plan ?? "",
-          )
-            .trim()
-            .toLowerCase();
+    const matchesPlan =
+      selectedPlan === "all" ||
+      candidatePlan === selectedPlan;
 
-          const selectedPlan = String(
-            plan ?? "",
-          )
-            .trim()
-            .toLowerCase();
+    const matchesDomain =
+      domain === "all" ||
+      String(candidate.domain ?? "").trim() ===
+        String(domain ?? "").trim();
 
-          const matchesPlan =
-            selectedPlan === "all" ||
-            (candidatePlan !== "" &&
-              candidatePlan === selectedPlan);
+    const matchesStatus =
+      status === "all" ||
+      String(candidate.status ?? "").trim() ===
+        String(status ?? "").trim();
 
-
-          const matchesDomain =
-            domain === "all" ||
-            String(candidate.domain ?? "").trim() ===
-              String(domain ?? "").trim();
-
-
-          const matchesStatus =
-            status === "all" ||
-            String(candidate.status ?? "").trim() ===
-              String(status ?? "").trim();
-
-
-          return (
-            matchesSearch &&
-            matchesPlan &&
-            matchesDomain &&
-            matchesStatus
-          );
-
-        },
-      );
-
-    }, [
-      query,
-      plan,
-      domain,
-      status,
-      localCandidates,
-    ]);
-
+    return (
+      matchesSearch &&
+      matchesPlan &&
+      matchesDomain &&
+      matchesStatus
+    );
+  });
+}, [
+  query,
+  plan,
+  domain,
+  status,
+  localCandidates,
+]);
   /* ============================================= */
   /* PAGINATION */
   /* ============================================= */
